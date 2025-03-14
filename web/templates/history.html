@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classify Audio Video - Historique</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header>
+        <div class="logo">Classify Audio Video</div>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Accueil</a></li>
+                <li><a href="{{ url_for('dashboard') }}">Tableau de bord</a></li>
+                <li><a href="{{ url_for('statistics') }}">Statistiques</a></li>
+                <li><a href="{{ url_for('history') }}" class="active">Historique</a></li>
+                <li><a href="{{ url_for('model_testing') }}">Test du modèle</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container history">
+        <h1>Historique des activités</h1>
+        
+        <div class="filter-section">
+            <div class="date-filter">
+                <label for="start-date">Date de début:</label>
+                <input type="date" id="start-date" name="start-date">
+                
+                <label for="end-date">Date de fin:</label>
+                <input type="date" id="end-date" name="end-date">
+            </div>
+            
+            <div class="activity-filter">
+                <label for="activity-type">Type d'activité:</label>
+                <select id="activity-type" name="activity-type">
+                    <option value="all">Toutes les activités</option>
+                    <option value="endormi">Endormi</option>
+                    <option value="à table">À table</option>
+                    <option value="lisant">Lisant</option>
+                    <option value="au téléphone">Au téléphone</option>
+                    <option value="en conversation">En conversation</option>
+                    <option value="occupé">Occupé</option>
+                    <option value="inactif">Inactif</option>
+                </select>
+            </div>
+            
+            <button id="apply-filters" class="btn primary">Appliquer les filtres</button>
+        </div>
+        
+        <div class="history-timeline">
+            <div class="timeline-header">
+                <div class="header-cell date-cell">Date et heure</div>
+                <div class="header-cell activity-cell">Activité</div>
+                <div class="header-cell duration-cell">Durée</div>
+                <div class="header-cell confidence-cell">Confiance</div>
+                <div class="header-cell actions-cell">Actions</div>
+            </div>
+            
+            <div class="timeline-body" id="activities-list">
+                <!-- Les activités seront insérées ici par JavaScript -->
+                <div class="loading-indicator">Chargement de l'historique...</div>
+            </div>
+            
+            <div class="timeline-footer">
+                <div class="pagination">
+                    <button id="prev-page" class="pagination-btn" disabled>&laquo; Précédent</button>
+                    <span id="page-info">Page 1 sur 1</span>
+                    <button id="next-page" class="pagination-btn" disabled>Suivant &raquo;</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="export-section">
+            <button id="export-history" class="btn">Exporter l'historique filtré</button>
+        </div>
+        
+        <!-- Modal pour afficher les détails d'une activité -->
+        <div id="activity-details-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2>Détails de l'activité</h2>
+                <div class="activity-details-content">
+                    <div class="detail-row">
+                        <div class="detail-label">Date et heure:</div>
+                        <div class="detail-value" id="detail-datetime">-</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Activité:</div>
+                        <div class="detail-value" id="detail-activity">-</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Durée:</div>
+                        <div class="detail-value" id="detail-duration">-</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Niveau de confiance:</div>
+                        <div class="detail-value" id="detail-confidence">-</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Métadonnées:</div>
+                        <pre class="detail-value code-block" id="detail-metadata">-</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Classify Audio Video</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/history.js') }}"></script>
+</body>
+</html>
