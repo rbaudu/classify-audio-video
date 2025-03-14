@@ -212,6 +212,46 @@ L'interface web offre plusieurs vues :
 4. **Historique** : Journal chronologique des activités détectées
 5. **Test du modèle** : Interface pour tester et affiner le modèle de classification
 
+### Fonctionnalités des scripts JavaScript
+
+#### main.js
+- **Utilitaires globaux** pour l'ensemble de l'application
+- Configuration des paramètres communs (URL API, intervalles, couleurs, icônes)
+- Fonctions de formatage (dates, durées)
+- Gestion des requêtes API
+- Surveillance de l'état de connexion au serveur
+- Gestionnaire de modales
+
+#### dashboard.js
+- Affichage en temps réel de l'activité courante
+- Mise à jour automatique des informations
+- Visualisation des statistiques quotidiennes
+- Chronologie graphique des activités récentes
+- Gestion des événements de reconnexion au serveur
+
+#### history.js
+- **Filtrage et recherche** dans l'historique des activités
+- Pagination des résultats
+- Affichage détaillé des activités (durée, niveau de confiance)
+- Visualisation des métadonnées dans une modale
+- Exportation des données filtrées au format CSV
+
+#### statistics.js
+- **Visualisation graphique** des données statistiques
+- Affichage de différentes périodes (jour, semaine, mois, année)
+- Graphiques de répartition des activités et durées
+- Distribution horaire des activités
+- Analyse des tendances d'activité
+- Exportation des données au format CSV et JSON
+
+#### model_testing.js
+- Affichage et contrôle des flux audio/vidéo en direct
+- **Visualisation des caractéristiques extraites**
+- Classification en temps réel et affichage des résultats
+- Niveaux de confiance pour chaque type d'activité
+- Gestion des informations sur le modèle
+- Fonctionnalités d'import/export et réentraînement du modèle
+
 ## Personnalisation
 
 ### Ajouter de nouvelles catégories d'activité
