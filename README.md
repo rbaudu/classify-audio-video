@@ -17,45 +17,45 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 
 ```
 classify-audio-video/
-├── README.md                 # Documentation du projet
-├── requirements.txt          # Dépendances Python
-├── server/                   # Code du serveur principal
-│   ├── __init__.py           
-│   ├── main.py               # Point d'entrée de l'application
-│   ├── config.py             # Configuration de l'application
-│   ├── capture/              # Module de capture des flux OBS
-│   │   ├── __init__.py
-│   │   ├── obs_capture.py    # Connexion et capture depuis OBS
-│   │   └── stream_processor.py # Traitement des flux audio/vidéo
-│   ├── analysis/             # Module d'analyse et classification
+├── README.md                     # Documentation du projet
+├── requirements.txt              # Dépendances Python
+├── server/                       # Code du serveur principal
+│   ├── __init__.py               # Initialisation du module server
+│   ├── main.py                   # Point d'entrée de l'application
+│   ├── config.py                 # Configuration de l'application
+│   ├── analysis/                 # Module d'analyse et classification
 │   │   ├── __init__.py
 │   │   └── activity_classifier.py # Classificateur d'activité
-│   ├── database/             # Module de stockage des données
+│   ├── api/                      # Module d'API et services externes
 │   │   ├── __init__.py
-│   │   └── db_manager.py     # Gestionnaire de base de données SQLite
-│   └── api/                  # Module d'API et services externes
+│   │   └── external_service.py   # Client pour le service externe
+│   ├── capture/                  # Module de capture des flux OBS
+│   │   ├── __init__.py
+│   │   ├── obs_capture.py        # Connexion et capture depuis OBS
+│   │   └── stream_processor.py   # Traitement des flux audio/vidéo
+│   └── database/                 # Module de stockage des données
 │       ├── __init__.py
-│       └── external_service.py # Client pour le service externe
-├── web/                      # Interface web
-│   ├── templates/            # Gabarits HTML
-│   │   ├── index.html        # Page d'accueil
-│   │   ├── dashboard.html    # Tableau de bord
-│   │   ├── statistics.html   # Statistiques d'activité
-│   │   ├── history.html      # Historique des activités
-│   │   └── model_testing.html # Test du modèle de classification
-│   └── static/               # Ressources statiques
-│       ├── css/              # Feuilles de style
-│       │   └── main.css      # Style principal
-│       └── js/               # Scripts JavaScript
-│           ├── main.js       # Script principal
-│           ├── dashboard.js  # Script du tableau de bord
-│           ├── statistics.js # Script des statistiques
-│           ├── history.js    # Script de l'historique
-│           └── model_testing.js # Script de test du modèle
-├── data/                     # Stockage des données
-│   └── activity.db           # Base de données SQLite (générée à l'exécution)
-└── models/                   # Modèles de classification pré-entraînés
-    └── activity_classifier.h5 # Modèle de classification (à fournir)
+│       └── db_manager.py         # Gestionnaire de base de données SQLite
+├── web/                          # Interface web
+│   ├── templates/                # Gabarits HTML
+│   │   ├── index.html            # Page d'accueil
+│   │   ├── dashboard.html        # Tableau de bord
+│   │   ├── statistics.html       # Statistiques d'activité
+│   │   ├── history.html          # Historique des activités
+│   │   └── model_testing.html    # Test du modèle de classification
+│   └── static/                   # Ressources statiques
+│       ├── css/                  # Feuilles de style
+│       │   └── main.css          # Style principal
+│       └── js/                   # Scripts JavaScript
+│           ├── main.js           # Script principal (utilitaires, configuration)
+│           ├── dashboard.js      # Script du tableau de bord
+│           ├── history.js        # Script de l'historique
+│           ├── statistics.js     # Script des statistiques
+│           └── model_testing.js  # Script de test du modèle
+├── data/                         # Stockage des données
+│   └── activity.db               # Base de données SQLite (générée à l'exécution)
+└── models/                       # Modèles de classification pré-entraînés
+    └── activity_classifier.h5    # Modèle de classification (à fournir)
 ```
 
 ## Prérequis
