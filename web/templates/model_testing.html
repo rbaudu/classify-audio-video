@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classify Audio Video - Test du modèle</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header>
+        <div class="logo">Classify Audio Video</div>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Accueil</a></li>
+                <li><a href="{{ url_for('dashboard') }}">Tableau de bord</a></li>
+                <li><a href="{{ url_for('statistics') }}">Statistiques</a></li>
+                <li><a href="{{ url_for('history') }}">Historique</a></li>
+                <li><a href="{{ url_for('model_testing') }}" class="active">Test du modèle</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container model-testing">
+        <h1>Test du modèle de classification</h1>
+        
+        <div class="testing-grid">
+            <div class="testing-card preview-card">
+                <h2>Aperçu en direct</h2>
+                <div class="preview-container">
+                    <div class="video-preview">
+                        <div class="video-feed" id="video-feed">
+                            <div class="no-feed-message">Flux vidéo non disponible</div>
+                        </div>
+                        <div class="preview-controls">
+                            <button id="refresh-feed" class="btn small">Rafraîchir</button>
+                        </div>
+                    </div>
+                    
+                    <div class="audio-preview">
+                        <div class="audio-visualizer" id="audio-visualizer">
+                            <div class="no-audio-message">Flux audio non disponible</div>
+                        </div>
+                        <div class="preview-controls">
+                            <button id="mute-audio" class="btn small">Muter</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="testing-card classification-card">
+                <h2>Résultat de classification</h2>
+                <div class="classification-result">
+                    <div class="result-activity">
+                        <div class="activity-label">Activité détectée:</div>
+                        <div class="activity-value" id="detected-activity">-</div>
+                    </div>
+                    
+                    <div class="confidence-levels">
+                        <h3>Niveau de confiance par activité</h3>
+                        <div class="confidence-bars" id="confidence-bars">
+                            <!-- Les barres de confiance seront générées par JavaScript -->
+                        </div>
+                    </div>
+                    
+                    <div class="classification-controls">
+                        <button id="run-classification" class="btn primary">Classifier maintenant</button>
+                        <div class="auto-update">
+                            <input type="checkbox" id="auto-update" name="auto-update">
+                            <label for="auto-update">Mise à jour automatique (5s)</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="testing-card features-card">
+                <h2>Caractéristiques détectées</h2>
+                <div class="features-container">
+                    <div class="features-section">
+                        <h3>Caractéristiques vidéo</h3>
+                        <table class="features-table" id="video-features">
+                            <tr>
+                                <td>Mouvement</td>
+                                <td id="motion-value">0%</td>
+                            </tr>
+                            <tr>
+                                <td>Détection de peau</td>
+                                <td id="skin-value">0%</td>
+                            </tr>
+                            <tr>
+                                <td>Luminosité</td>
+                                <td id="brightness-value">0</td>
+                            </tr>
+                            <!-- Autres caractéristiques vidéo -->
+                        </table>
+                    </div>
+                    
+                    <div class="features-section">
+                        <h3>Caractéristiques audio</h3>
+                        <table class="features-table" id="audio-features">
+                            <tr>
+                                <td>Niveau sonore</td>
+                                <td id="audio-level-value">0</td>
+                            </tr>
+                            <tr>
+                                <td>Fréquence dominante</td>
+                                <td id="dominant-freq-value">0 Hz</td>
+                            </tr>
+                            <tr>
+                                <td>Parole détectée</td>
+                                <td id="speech-detected-value">Non</td>
+                            </tr>
+                            <!-- Autres caractéristiques audio -->
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="testing-card model-info-card">
+                <h2>Informations sur le modèle</h2>
+                <div class="model-info">
+                    <div class="info-item">
+                        <div class="info-label">Modèle utilisé:</div>
+                        <div class="info-value" id="model-name">Classificateur basé sur des règles</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Précision estimée:</div>
+                        <div class="info-value" id="model-accuracy">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Dernière mise à jour:</div>
+                        <div class="info-value" id="model-last-update">-</div>
+                    </div>
+                </div>
+                <div class="model-actions">
+                    <button id="retrain-model" class="btn">Réentraîner le modèle</button>
+                    <button id="export-model" class="btn">Exporter le modèle</button>
+                    <button id="import-model" class="btn">Importer un modèle</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Classify Audio Video</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/model_testing.js') }}"></script>
+</body>
+</html>
