@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classify Audio Video - Tableau de bord</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header>
+        <div class="logo">Classify Audio Video</div>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Accueil</a></li>
+                <li><a href="{{ url_for('dashboard') }}" class="active">Tableau de bord</a></li>
+                <li><a href="{{ url_for('statistics') }}">Statistiques</a></li>
+                <li><a href="{{ url_for('history') }}">Historique</a></li>
+                <li><a href="{{ url_for('model_testing') }}">Test du modèle</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container dashboard">
+        <h1>Tableau de bord</h1>
+        
+        <div class="dashboard-grid">
+            <div class="dashboard-card status-card">
+                <h2>État du système</h2>
+                <div class="status-indicator" id="system-status">
+                    <div class="status-dot connected"></div>
+                    <span class="status-text">Connecté</span>
+                </div>
+                <div class="status-details">
+                    <div class="status-item">
+                        <span class="status-label">OBS:</span>
+                        <span class="status-value" id="obs-status">Connecté</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Service externe:</span>
+                        <span class="status-value" id="external-service-status">Connecté</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Temps d'exécution:</span>
+                        <span class="status-value" id="uptime">00:00:00</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="dashboard-card activity-card">
+                <h2>Activité actuelle</h2>
+                <div class="current-activity" id="current-activity">
+                    <div class="activity-icon">❓</div>
+                    <div class="activity-name">En attente...</div>
+                    <div class="activity-time">Dernière mise à jour: <span id="last-update-time">-</span></div>
+                </div>
+            </div>
+            
+            <div class="dashboard-card stats-overview-card">
+                <h2>Aperçu des statistiques</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="total-activities-today">0</div>
+                        <div class="stat-label">Classifications aujourd'hui</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="most-common-activity">-</div>
+                        <div class="stat-label">Activité la plus fréquente</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="active-time">0h</div>
+                        <div class="stat-label">Temps actif aujourd'hui</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="inactive-time">0h</div>
+                        <div class="stat-label">Temps inactif aujourd'hui</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="dashboard-card activity-timeline-card">
+                <h2>Chronologie des activités</h2>
+                <div class="timeline-container" id="activity-timeline">
+                    <div class="timeline-loading">Chargement des données...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Classify Audio Video</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
