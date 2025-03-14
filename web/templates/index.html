@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classify Audio Video - Accueil</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header>
+        <div class="logo">Classify Audio Video</div>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}" class="active">Accueil</a></li>
+                <li><a href="{{ url_for('dashboard') }}">Tableau de bord</a></li>
+                <li><a href="{{ url_for('statistics') }}">Statistiques</a></li>
+                <li><a href="{{ url_for('history') }}">Historique</a></li>
+                <li><a href="{{ url_for('model_testing') }}">Test du modèle</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container">
+        <section class="hero">
+            <h1>Surveillance d'activité en temps réel</h1>
+            <p>Système de classification d'activité basé sur l'analyse des flux OBS</p>
+            <div class="cta-buttons">
+                <a href="{{ url_for('dashboard') }}" class="btn primary">Voir le tableau de bord</a>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="feature-card">
+                <div class="feature-icon">📹</div>
+                <h3>Capture en continu</h3>
+                <p>Réception et analyse des flux vidéo et audio d'OBS Studio</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🧠</div>
+                <h3>Classification d'activité</h3>
+                <p>Détection automatique de 7 types d'activités différentes</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Statistiques détaillées</h3>
+                <p>Analyse des tendances et des habitudes sur différentes périodes</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔌</div>
+                <h3>Intégration externe</h3>
+                <p>Envoi des données d'activité vers des services tiers</p>
+            </div>
+        </section>
+
+        <section class="overview">
+            <h2>Comment ça fonctionne</h2>
+            <div class="overview-container">
+                <div class="overview-step">
+                    <div class="step-number">1</div>
+                    <h3>Capture</h3>
+                    <p>Connexion à OBS Studio via websocket pour recevoir les flux vidéo et audio.</p>
+                </div>
+                <div class="overview-step">
+                    <div class="step-number">2</div>
+                    <h3>Analyse</h3>
+                    <p>Traitement des flux avec des algorithmes de détection de mouvements et de reconnaissance audio.</p>
+                </div>
+                <div class="overview-step">
+                    <div class="step-number">3</div>
+                    <h3>Classification</h3>
+                    <p>Identification de l'activité avec un modèle d'IA ou des règles prédéfinies.</p>
+                </div>
+                <div class="overview-step">
+                    <div class="step-number">4</div>
+                    <h3>Résultat</h3>
+                    <p>Enregistrement de l'activité et envoi vers un service externe toutes les 5 minutes.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="activity-categories">
+            <h2>Catégories d'activités</h2>
+            <div class="categories-grid">
+                <div class="category-item">
+                    <h3>Endormi</h3>
+                    <p>Très peu de mouvement, peu ou pas de son</p>
+                </div>
+                <div class="category-item">
+                    <h3>À table</h3>
+                    <p>Mouvements caractéristiques de repas</p>
+                </div>
+                <div class="category-item">
+                    <h3>Lisant</h3>
+                    <p>Position statique, concentration visuelle</p>
+                </div>
+                <div class="category-item">
+                    <h3>Au téléphone</h3>
+                    <p>Parole détectée, position caractéristique</p>
+                </div>
+                <div class="category-item">
+                    <h3>En conversation</h3>
+                    <p>Échange verbal, gesticulations</p>
+                </div>
+                <div class="category-item">
+                    <h3>Occupé</h3>
+                    <p>Mouvements importants, activité physique</p>
+                </div>
+                <div class="category-item">
+                    <h3>Inactif</h3>
+                    <p>Peu de mouvement, absence prolongée</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Classify Audio Video</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
