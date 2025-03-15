@@ -174,6 +174,207 @@ http://localhost:5000
    - Cliquez sur "Analyser cette image" pour classifier l'image actuelle
    - Ou cliquez sur "Analyser la vidéo complète" pour une analyse de toute la vidéo
 
+## Débogage avec ipdb
+
+Pour faciliter le débogage de l'application, vous pouvez utiliser ipdb (Improved Python Debugger), qui offre une interface interactive pour inspecter et manipuler le code pendant son exécution.
+
+### Installation d'ipdb
+
+Si ce n'est pas déjà fait, installez ipdb :
+```bash
+pip install ipdb
+```
+
+### Utilisation basique
+
+1. **Ajouter un point d'arrêt dans le code** :
+   ```python
+   import ipdb
+   
+   def ma_fonction():
+       # Code...
+       ipdb.set_trace()  # Le débogueur s'arrêtera ici
+       # Suite du code...
+   ```
+
+2. **Commandes ipdb utiles** :
+   - `n` (next) : Exécuter la ligne suivante sans entrer dans les fonctions
+   - `s` (step) : Exécuter la ligne suivante et entrer dans les fonctions
+   - `c` (continue) : Continuer l'exécution jusqu'au prochain point d'arrêt
+   - `q` (quit) : Quitter le débogueur et arrêter l'exécution
+   - `p expression` : Afficher la valeur d'une expression
+   - `pp expression` : Afficher la valeur d'une expression avec un affichage formaté
+   - `l` : Afficher le code autour de la ligne courante
+   - `ll` : Afficher la fonction courante
+   - `w` : Afficher la pile d'appels
+   - `b ligne` ou `b fichier:ligne` : Ajouter un point d'arrêt
+   - `h` : Afficher l'aide des commandes
+
+### Débogage spécifique à Classify Audio Video
+
+Pour déboguer les parties critiques de l'application :
+
+1. **Débogage de la capture OBS** :
+   ```python
+   # Dans obs_capture.py
+   def connect_to_obs(self):
+       import ipdb; ipdb.set_trace()
+       # Inspectez les paramètres de connexion et le processus d'établissement de la connexion
+   ```
+
+2. **Débogage du classificateur d'activité** :
+   ```python
+   # Dans activity_classifier.py
+   def classify_activity(self, video_frame, audio_data):
+       import ipdb; ipdb.set_trace()
+       # Examinez les données d'entrée et les résultats de classification
+   ```
+
+3. **Débogage de l'analyse de fichiers vidéo** :
+   ```python
+   # Dans main.py, fonction analyze_video
+   def analyze_video(video_source, interval):
+       import ipdb; ipdb.set_trace()
+       # Inspectez le processus d'analyse et les résultats
+   ```
+
+### Conseils avancés pour ipdb
+
+1. **Points d'arrêt conditionnels** :
+   ```python
+   if problematic_condition:
+       import ipdb; ipdb.set_trace()
+   ```
+
+2. **Utilisation avec les exceptions** :
+   ```python
+   try:
+       # Code susceptible de générer une exception
+   except Exception as e:
+       import ipdb; ipdb.set_trace()
+       # Inspectez l'exception et l'état du programme
+   ```
+
+3. **Déboguer avec post-mortem** : Si le programme plante, vous pouvez examiner l'état au moment du plantage :
+   ```python
+   try:
+       # Code qui plante
+   except:
+       import ipdb; ipdb.post_mortem()
+   ```
+
+4. **Lancer l'application en mode débogage** :
+   ```bash
+   python -m ipdb server/main.py
+   ```
+
+## Débogage du serveur Flask
+
+L'application utilise Flask comme framework web. Voici comment déboguer efficacement le serveur et les aspects liés à l'interface web.
+
+### Configuration du mode debug
+
+1. **Activer le mode debug dans Flask** :
+   ```python
+   # Dans main.py
+   app = Flask(__name__, template_folder='../web/templates', static_folder='../web/static')
+   app.config['DEBUG'] = True
+   
+   if __name__ == '__main__':
+       app.run(host='0.0.0.0', port=5000, debug=True)
+   ```
+
+2. **Avantages du mode debug** :
+   - Rechargement automatique du serveur lors des modifications de code
+   - Traceback interactif dans le navigateur en cas d'erreur
+   - Console de débogage intégrée
+   - Préservation des sessions lors du redémarrage
+
+### Utilisation de Flask avec ipdb
+
+1. **Déboguer les routes Flask** :
+   ```python
+   @app.route('/dashboard')
+   def dashboard():
+       import ipdb; ipdb.set_trace()
+       # Examinez les données et le contexte avant le rendu du template
+       return render_template('dashboard.html')
+   ```
+
+2. **Déboguer les requêtes AJAX** :
+   ```python
+   @app.route('/api/analyze_frame', methods=['POST'])
+   def analyze_frame_api():
+       import ipdb; ipdb.set_trace()
+       # Inspectez les données de la requête et préparez la réponse
+       data = request.json
+       # Traitement...
+       return jsonify(result)
+   ```
+
+3. **Déboguer les templates** : Pour trouver les problèmes de rendu ou de variables dans les templates, ajoutez des points d'arrêt avant l'appel à `render_template`.
+
+### Conseils pour déboguer Flask
+
+1. **Journalisation avancée** :
+   ```python
+   import logging
+   logging.basicConfig(level=logging.DEBUG)
+   logger = logging.getLogger(__name__)
+   
+   @app.route('/complex_route')
+   def complex_route():
+       logger.debug("Entering complex_route with args: %s", request.args)
+       # Code...
+       logger.debug("Processing complete, result: %s", result)
+       return result
+   ```
+
+2. **Inspecter les sessions et cookies** :
+   ```python
+   @app.route('/check_session')
+   def check_session():
+       import ipdb; ipdb.set_trace()
+       # Examinez session, request.cookies, etc.
+       return jsonify(dict(session))
+   ```
+
+3. **Déboguer les problèmes de requêtes parallèles** :
+   - En mode débogage avec ipdb, les requêtes supplémentaires peuvent rester en attente
+   - Utilisez des sessions de navigateur distinctes ou des navigateurs différents pour tester
+   - Pensez à utiliser un délai de timeout plus long dans le client JavaScript pour les requêtes AJAX
+
+4. **Tester les réponses API** :
+   ```python
+   @app.route('/api/activity_data')
+   def get_activity_data():
+       # Préparer les données
+       response_data = prepare_activity_data()
+       
+       # Vérifier les données avant de les renvoyer
+       if debug_mode:
+           import ipdb; ipdb.set_trace()
+           # Inspectez response_data pour vérifier sa structure
+       
+       return jsonify(response_data)
+   ```
+
+### Déboguer les WebSockets (si utilisés)
+
+Si votre application utilise des WebSockets pour des communications en temps réel :
+
+```python
+@socketio.on('connect')
+def handle_connect():
+    import ipdb; ipdb.set_trace()
+    # Examinez l'établissement de la connexion
+
+@socketio.on('activity_update')
+def handle_activity_update(data):
+    import ipdb; ipdb.set_trace()
+    # Examinez les données d'activité reçues
+```
+
 ## Fonctionnement technique
 
 ### Capture de flux
