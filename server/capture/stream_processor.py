@@ -6,6 +6,9 @@ import cv2
 import numpy as np
 from scipy import signal
 
+# Import de la configuration
+from server import VIDEO_RESOLUTION, AUDIO_SAMPLE_RATE
+
 logger = logging.getLogger(__name__)
 
 class StreamProcessor:
@@ -13,21 +16,23 @@ class StreamProcessor:
     Classe pour le traitement des flux vidéo et audio avant analyse.
     """
     
-    def __init__(self, video_resolution=(224, 224), audio_sample_rate=16000):
+    def __init__(self, video_resolution=None, audio_sample_rate=None):
         """
         Initialise le processeur de flux.
         
         Args:
-            video_resolution (tuple): Résolution cible pour les images vidéo (largeur, hauteur)
-            audio_sample_rate (int): Taux d'échantillonnage cible pour l'audio
+            video_resolution (tuple, optional): Résolution cible pour les images vidéo (largeur, hauteur).
+                Si None, utilise la valeur de la configuration.
+            audio_sample_rate (int, optional): Taux d'échantillonnage cible pour l'audio.
+                Si None, utilise la valeur de la configuration.
         """
-        self.video_resolution = video_resolution
-        self.audio_sample_rate = audio_sample_rate
+        self.video_resolution = video_resolution or VIDEO_RESOLUTION
+        self.audio_sample_rate = audio_sample_rate or AUDIO_SAMPLE_RATE
         
         # Historique des frames pour détection de mouvement
         self.previous_frame = None
         
-        logger.info(f"Processeur de flux initialisé avec résolution vidéo {video_resolution} et taux d'échantillonnage audio {audio_sample_rate}")
+        logger.info(f"Processeur de flux initialisé avec résolution vidéo {self.video_resolution} et taux d'échantillonnage audio {self.audio_sample_rate}")
     
     def process_video(self, frame):
         """
