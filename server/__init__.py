@@ -4,13 +4,35 @@
 # Exporter les configurations essentielles pour une utilisation facile
 from server.config import Config
 
-# Configuration OBS exportée au niveau du module
+# Configuration de base
+SECRET_KEY = Config.SECRET_KEY
+DEBUG = Config.DEBUG
+FLASK_HOST = Config.FLASK_HOST
+WEB_PORT = Config.FLASK_PORT
+
+# Configuration OBS
 OBS_HOST = Config.OBS_HOST
 OBS_PORT = Config.OBS_PORT
 OBS_PASSWORD = Config.OBS_PASSWORD
 
-# Autres configurations essentielles
-WEB_PORT = Config.FLASK_PORT
+# Configuration des chemins
+BASE_DIR = Config.BASE_DIR
+DB_PATH = Config.DATABASE_PATH
+MODEL_PATH = Config.MODEL_PATH
+
+# Configuration du service externe
+EXTERNAL_SERVICE_URL = Config.EXTERNAL_SERVICE_URL
+EXTERNAL_SERVICE_API_KEY = Config.EXTERNAL_SERVICE_API_KEY
+
+# Configuration des activités
+ACTIVITY_CLASSES = Config.ACTIVITY_CLASSES
+
+# Configuration des paramètres de capture
+VIDEO_RESOLUTION = Config.VIDEO_RESOLUTION
+AUDIO_SAMPLE_RATE = Config.AUDIO_SAMPLE_RATE
+AUDIO_CHANNELS = Config.AUDIO_CHANNELS
+
+# Configuration des intervalles
 ANALYSIS_INTERVAL = Config.ANALYSIS_INTERVAL
 
 # Variables pour l'interface
