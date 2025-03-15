@@ -8,12 +8,12 @@ from flask import Flask, request, jsonify, render_template, send_from_directory
 import threading
 
 # Import des modules du projet
-from .capture.obs_capture import OBSCapture
-from .capture.stream_processor import StreamProcessor
-from .analysis.activity_classifier import ActivityClassifier
-from .database.db_manager import DBManager
-from .api.external_service import ExternalServiceClient
-from .config import (
+from server.capture.obs_capture import OBSCapture
+from server.capture.stream_processor import StreamProcessor
+from server.analysis.activity_classifier import ActivityClassifier
+from server.database.db_manager import DBManager
+from server.api.external_service import ExternalServiceClient
+from server import (
     WEB_PORT,
     ANALYSIS_INTERVAL,
     ACTIVITY_ICONS,
