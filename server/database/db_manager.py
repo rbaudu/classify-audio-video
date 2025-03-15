@@ -1,52 +1,53 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-import logging
-import sqlite3
 import os
-import time
 import json
-from datetime import datetime, timedelta
+import sqlite3
+import logging
+import time
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Import de la configuration
+from ..config import DB_PATH
 
 class DBManager:
     """
-    Classe pour la gestion de la base de données des activités détectées.
+    Gestionnaire de base de données SQLite pour stocker l'historique des activités
+    et les analyses de vidéo
     """
     
-    def __init__(self, db_path):
+    def __init__(self, db_path=None):
         """
-        Initialise le gestionnaire de base de données.
+        Initialise le gestionnaire de base de données
         
         Args:
-            db_path (str): Chemin vers le fichier de base de données SQLite
+            db_path (str, optional): Chemin vers le fichier de base de données.
+                                     Si None, utilise DB_PATH de la configuration.
         """
-        self.db_path = db_path
+        self.logger = logging.getLogger(__name__)
         
-        # Création du dossier parent si nécessaire
+        # Utiliser le chemin par défaut si non spécifié
+        if not db_path:
+            db_path = DB_PATH
+        
+        # Créer le répertoire parent si nécessaire
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         
-        logger.info(f"Gestionnaire de base de données initialisé avec {db_path}")
+        self.db_path = db_path
+        self.initialize_db()
     
     def get_connection(self):
         """
-        Établit une connexion à la base de données.
+        Crée et retourne une connexion à la base de données
         
         Returns:
-            sqlite3.Connection: Connexion à la base de données
+            sqlite3.Connection: Connexion SQLite
         """
         conn = sqlite3.connect(self.db_path)
-        # Configuration pour récupérer les résultats sous forme de dictionnaires
-        conn.row_factory = sqlite3.Row
+        conn.row_factory = sqlite3.Row  # Pour accéder aux colonnes par nom
         return conn
     
-    def init_db(self):
+    def initialize_db(self):
         """
-        Initialise la structure de la base de données si elle n'existe pas déjà.
-        
-        Returns:
-            bool: True si l'initialisation a réussi, False sinon
+        Initialise la base de données en créant les tables si elles n'existent pas
         """
         try:
             conn = self.get_connection()
@@ -54,287 +55,492 @@ class DBManager:
             
             # Création de la table des activités
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS activities (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp INTEGER NOT NULL,
-                    date_time TEXT NOT NULL,
-                    activity TEXT NOT NULL,
-                    confidence REAL DEFAULT 1.0,
-                    metadata TEXT
-                )
+            CREATE TABLE IF NOT EXISTS activities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity TEXT NOT NULL,
+                confidence REAL,
+                timestamp INTEGER NOT NULL,
+                metadata TEXT
+            )
             ''')
             
-            # Création d'index pour des requêtes optimisées
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON activities(timestamp)')
+            # Création de la table des analyses vidéo
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS video_analyses (
+                id TEXT PRIMARY KEY,
+                source_name TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                results TEXT NOT NULL
+            )
+            ''')
             
             conn.commit()
-            logger.info("Base de données initialisée avec succès")
-            return True
+            self.logger.info("Base de données initialisée avec succès")
         except Exception as e:
-            logger.error(f"Erreur lors de l'initialisation de la base de données: {str(e)}")
-            return False
-        finally:
-            if conn:
-                conn.close()
+            self.logger.error(f"Erreur lors de l'initialisation de la base de données: {str(e)}")
     
-    def save_activity(self, timestamp, activity, confidence=1.0, metadata=None):
+    def add_activity(self, activity, confidence, timestamp, metadata=None):
         """
-        Enregistre une activité détectée dans la base de données.
+        Ajoute une nouvelle activité à la base de données
         
         Args:
-            timestamp (int): Horodatage Unix de l'activité
             activity (str): Type d'activité détectée
-            confidence (float, optional): Niveau de confiance de la détection (0-1)
-            metadata (dict, optional): Métadonnées supplémentaires
-            
+            confidence (float): Niveau de confiance (0-1)
+            timestamp (int): Horodatage Unix en secondes
+            metadata (str, optional): Métadonnées supplémentaires au format JSON. Défaut à None.
+        
         Returns:
-            int: ID de l'enregistrement créé
+            int: ID de l'activité insérée
         """
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
             
-            # Conversion de l'horodatage en date/heure lisible
-            date_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Conversion des métadonnées en JSON si nécessaire
-            metadata_json = json.dumps(metadata) if metadata else None
-            
-            # Insertion de l'activité
             cursor.execute('''
-                INSERT INTO activities (timestamp, date_time, activity, confidence, metadata)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (timestamp, date_time, activity, confidence, metadata_json))
+            INSERT INTO activities (activity, confidence, timestamp, metadata)
+            VALUES (?, ?, ?, ?)
+            ''', (activity, confidence, timestamp, metadata))
             
             conn.commit()
+            
+            # Récupérer l'ID généré
             activity_id = cursor.lastrowid
             
-            logger.info(f"Activité '{activity}' enregistrée à {date_time} (ID: {activity_id})")
+            self.logger.info(f"Activité enregistrée avec succès (ID: {activity_id})")
             return activity_id
         except Exception as e:
-            logger.error(f"Erreur lors de l'enregistrement d'une activité: {str(e)}")
+            self.logger.error(f"Erreur lors de l'ajout d'une activité: {str(e)}")
             return None
-        finally:
-            if conn:
-                conn.close()
     
     def get_latest_activity(self):
         """
-        Récupère l'activité la plus récente.
+        Récupère la dernière activité enregistrée
         
         Returns:
-            dict: Informations sur l'activité la plus récente
+            dict: Informations sur la dernière activité ou None si aucune n'est trouvée
         """
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
             
             cursor.execute('''
-                SELECT * FROM activities
-                ORDER BY timestamp DESC
-                LIMIT 1
+            SELECT id, activity, confidence, timestamp, metadata
+            FROM activities
+            ORDER BY timestamp DESC
+            LIMIT 1
             ''')
             
-            result = cursor.fetchone()
+            row = cursor.fetchone()
             
-            if result:
-                # Conversion en dictionnaire
-                activity = dict(result)
-                
-                # Décodage des métadonnées si présentes
-                if activity.get('metadata'):
-                    activity['metadata'] = json.loads(activity['metadata'])
-                
-                return activity
+            if row:
+                return dict(row)
             else:
-                logger.warning("Aucune activité trouvée")
                 return None
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération de l'activité récente: {str(e)}")
+            self.logger.error(f"Erreur lors de la récupération de la dernière activité: {str(e)}")
             return None
-        finally:
-            if conn:
-                conn.close()
     
-    def get_activities(self, start_time=None, end_time=None, limit=100):
+    def get_activities(self, start_time=None, end_time=None, limit=100, offset=0):
         """
-        Récupère les activités dans un intervalle de temps donné.
+        Récupère les activités dans une plage de temps donnée, avec pagination
         
         Args:
-            start_time (int, optional): Horodatage de début
-            end_time (int, optional): Horodatage de fin
-            limit (int, optional): Nombre maximum d'activités à récupérer
-            
+            start_time (int, optional): Horodatage de début. Défaut à None (pas de limite).
+            end_time (int, optional): Horodatage de fin. Défaut à None (pas de limite).
+            limit (int, optional): Nombre maximum d'activités à récupérer. Défaut à 100.
+            offset (int, optional): Décalage pour la pagination. Défaut à 0.
+        
         Returns:
-            list: Liste des activités correspondantes
+            list: Liste des activités correspondant aux critères
         """
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
             
-            query = "SELECT * FROM activities"
+            # Construire la requête SQL avec les filtres de temps
+            query = '''
+            SELECT id, activity, confidence, timestamp, metadata
+            FROM activities
+            WHERE 1=1
+            '''
             params = []
             
-            # Construction de la clause WHERE en fonction des paramètres
-            where_clauses = []
-            
             if start_time is not None:
-                where_clauses.append("timestamp >= ?")
+                query += ' AND timestamp >= ?'
                 params.append(start_time)
             
             if end_time is not None:
-                where_clauses.append("timestamp <= ?")
+                query += ' AND timestamp <= ?'
                 params.append(end_time)
             
-            if where_clauses:
-                query += " WHERE " + " AND ".join(where_clauses)
-            
-            # Ajout du tri et de la limite
-            query += " ORDER BY timestamp DESC LIMIT ?"
-            params.append(limit)
+            # Ajouter l'ordre et la pagination
+            query += '''
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+            '''
+            params.extend([limit, offset])
             
             cursor.execute(query, params)
             
-            results = cursor.fetchall()
-            
-            # Conversion des résultats en liste de dictionnaires
-            activities = []
-            for result in results:
-                activity = dict(result)
-                
-                # Décodage des métadonnées si présentes
-                if activity.get('metadata'):
-                    activity['metadata'] = json.loads(activity['metadata'])
-                
-                activities.append(activity)
-            
-            return activities
+            return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération des activités: {str(e)}")
+            self.logger.error(f"Erreur lors de la récupération des activités: {str(e)}")
             return []
-        finally:
-            if conn:
-                conn.close()
     
-    def get_statistics(self, period='day'):
+    def get_activity_count(self, start_time=None, end_time=None):
         """
-        Récupère des statistiques sur les activités détectées pour une période donnée.
+        Compte le nombre d'activités dans une plage de temps donnée
         
         Args:
-            period (str): Période ('day', 'week', 'month', 'year')
-            
+            start_time (int, optional): Horodatage de début. Défaut à None (pas de limite).
+            end_time (int, optional): Horodatage de fin. Défaut à None (pas de limite).
+        
         Returns:
-            dict: Statistiques calculées
+            int: Nombre d'activités correspondant aux critères
         """
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
             
-            # Détermination de la date de début en fonction de la période
-            now = datetime.now()
+            # Construire la requête SQL avec les filtres de temps
+            query = 'SELECT COUNT(*) FROM activities WHERE 1=1'
+            params = []
             
-            if period == 'day':
-                start_time = int(datetime(now.year, now.month, now.day).timestamp())
-            elif period == 'week':
-                # Début de la semaine (lundi)
-                start_time = int((now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0).timestamp())
-            elif period == 'month':
-                start_time = int(datetime(now.year, now.month, 1).timestamp())
-            elif period == 'year':
-                start_time = int(datetime(now.year, 1, 1).timestamp())
-            else:
-                # Par défaut: dernières 24 heures
-                start_time = int((now - timedelta(days=1)).timestamp())
+            if start_time is not None:
+                query += ' AND timestamp >= ?'
+                params.append(start_time)
             
-            # Récupération du nombre d'activités par type
-            cursor.execute('''
-                SELECT activity, COUNT(*) as count
-                FROM activities
-                WHERE timestamp >= ?
-                GROUP BY activity
-                ORDER BY count DESC
-            ''', (start_time,))
+            if end_time is not None:
+                query += ' AND timestamp <= ?'
+                params.append(end_time)
             
-            activity_counts = cursor.fetchall()
+            cursor.execute(query, params)
             
-            # Récupération de la durée totale par activité
-            # Pour cela, nous devons analyser les timestamps consécutifs
-            cursor.execute('''
-                SELECT id, timestamp, activity
-                FROM activities
-                WHERE timestamp >= ?
-                ORDER BY timestamp
-            ''', (start_time,))
+            return cursor.fetchone()[0]
+        except Exception as e:
+            self.logger.error(f"Erreur lors du comptage des activités: {str(e)}")
+            return 0
+    
+    def get_activity_stats(self, start_time=None, end_time=None):
+        """
+        Calcule des statistiques sur les activités dans une plage de temps donnée
+        
+        Args:
+            start_time (int, optional): Horodatage de début. Défaut à None (pas de limite).
+            end_time (int, optional): Horodatage de fin. Défaut à None (pas de limite).
+        
+        Returns:
+            dict: Statistiques d'activité
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
             
-            activities_timeline = cursor.fetchall()
+            # Compter les activités par type
+            query = '''
+            SELECT activity, COUNT(*) as count
+            FROM activities
+            WHERE 1=1
+            '''
+            params = []
             
-            # Calcul des durées par activité
+            if start_time is not None:
+                query += ' AND timestamp >= ?'
+                params.append(start_time)
+            
+            if end_time is not None:
+                query += ' AND timestamp <= ?'
+                params.append(end_time)
+            
+            query += ' GROUP BY activity'
+            
+            cursor.execute(query, params)
+            activity_counts = {row['activity']: row['count'] for row in cursor.fetchall()}
+            
+            # Calculer les durées totales (estimation à partir des intervalles entre activités)
+            # Note: Ce calcul est approximatif car il dépend des intervalles d'enregistrement
+            query = '''
+            SELECT id, activity, timestamp
+            FROM activities
+            WHERE 1=1
+            '''
+            params = []
+            
+            if start_time is not None:
+                query += ' AND timestamp >= ?'
+                params.append(start_time)
+            
+            if end_time is not None:
+                query += ' AND timestamp <= ?'
+                params.append(end_time)
+            
+            query += ' ORDER BY timestamp'
+            
+            cursor.execute(query, params)
+            activities = cursor.fetchall()
+            
             activity_durations = {}
-            prev_timestamp = None
-            prev_activity = None
             
-            for activity_record in activities_timeline:
-                current_timestamp = activity_record['timestamp']
-                current_activity = activity_record['activity']
+            for i in range(len(activities) - 1):
+                current = activities[i]
+                next_act = activities[i + 1]
                 
-                if prev_timestamp is not None and prev_activity is not None:
-                    # Durée en secondes entre les deux détections
-                    duration = current_timestamp - prev_timestamp
-                    
-                    # Mise à jour de la durée cumulée pour cette activité
-                    if prev_activity in activity_durations:
-                        activity_durations[prev_activity] += duration
-                    else:
-                        activity_durations[prev_activity] = duration
+                duration = next_act['timestamp'] - current['timestamp']
                 
-                prev_timestamp = current_timestamp
-                prev_activity = current_activity
+                if current['activity'] not in activity_durations:
+                    activity_durations[current['activity']] = 0
+                
+                activity_durations[current['activity']] += duration
             
-            # Si la dernière activité est toujours en cours, lui attribuer la durée jusqu'à maintenant
-            if prev_activity and prev_timestamp:
-                current_time = int(time.time())
-                duration = current_time - prev_timestamp
-                
-                if prev_activity in activity_durations:
-                    activity_durations[prev_activity] += duration
-                else:
-                    activity_durations[prev_activity] = duration
-            
-            # Compilation des statistiques
-            statistics = {
-                'period': period,
-                'start_time': start_time,
-                'end_time': int(time.time()),
+            return {
+                'activity_counts': activity_counts,
+                'activity_durations': activity_durations,
+                'total_count': sum(activity_counts.values())
+            }
+        except Exception as e:
+            self.logger.error(f"Erreur lors du calcul des statistiques: {str(e)}")
+            return {
                 'activity_counts': {},
                 'activity_durations': {},
-                'most_frequent_activity': None,
-                'longest_activity': None
+                'total_count': 0
             }
+    
+    def delete_activities(self, start_time=None, end_time=None):
+        """
+        Supprime les activités dans une plage de temps donnée
+        
+        Args:
+            start_time (int, optional): Horodatage de début. Défaut à None (pas de limite).
+            end_time (int, optional): Horodatage de fin. Défaut à None (pas de limite).
+        
+        Returns:
+            int: Nombre d'activités supprimées
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
             
-            # Conversion des résultats en dictionnaires
-            for item in activity_counts:
-                activity = item['activity']
-                count = item['count']
-                statistics['activity_counts'][activity] = count
-                
-                # Mise à jour de l'activité la plus fréquente
-                if statistics['most_frequent_activity'] is None or count > statistics['activity_counts'].get(statistics['most_frequent_activity'], 0):
-                    statistics['most_frequent_activity'] = activity
+            # Construire la requête SQL avec les filtres de temps
+            query = 'DELETE FROM activities WHERE 1=1'
+            params = []
             
-            # Conversion des durées en minutes et mise à jour de l'activité la plus longue
-            for activity, duration in activity_durations.items():
-                # Conversion en minutes
-                duration_minutes = duration / 60
-                statistics['activity_durations'][activity] = round(duration_minutes, 1)
-                
-                # Mise à jour de l'activité la plus longue
-                if statistics['longest_activity'] is None or duration > activity_durations.get(statistics['longest_activity'], 0):
-                    statistics['longest_activity'] = activity
+            if start_time is not None:
+                query += ' AND timestamp >= ?'
+                params.append(start_time)
             
-            return statistics
+            if end_time is not None:
+                query += ' AND timestamp <= ?'
+                params.append(end_time)
+            
+            cursor.execute(query, params)
+            affected_rows = cursor.rowcount
+            
+            conn.commit()
+            
+            self.logger.info(f"{affected_rows} activités supprimées")
+            return affected_rows
         except Exception as e:
-            logger.error(f"Erreur lors du calcul des statistiques: {str(e)}")
-            return {'error': str(e)}
-        finally:
-            if conn:
-                conn.close()
+            self.logger.error(f"Erreur lors de la suppression des activités: {str(e)}")
+            return 0
+    
+    # Méthodes pour gérer les analyses vidéo
+    
+    def save_video_analysis(self, analysis_id, source_name, results):
+        """
+        Sauvegarde une analyse vidéo complète
+        
+        Args:
+            analysis_id (str): Identifiant unique de l'analyse
+            source_name (str): Nom de la source vidéo
+            results (list): Résultats de l'analyse (liste de dictionnaires)
+        
+        Returns:
+            bool: True si l'opération a réussi, False sinon
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            # Convertir les résultats en JSON
+            results_json = json.dumps(results)
+            
+            # Timestamp actuel
+            timestamp = int(time.time())
+            
+            cursor.execute('''
+            INSERT INTO video_analyses (id, source_name, timestamp, results)
+            VALUES (?, ?, ?, ?)
+            ''', (analysis_id, source_name, timestamp, results_json))
+            
+            conn.commit()
+            
+            self.logger.info(f"Analyse vidéo enregistrée avec succès (ID: {analysis_id})")
+            return True
+        except Exception as e:
+            self.logger.error(f"Erreur lors de l'enregistrement de l'analyse vidéo: {str(e)}")
+            return False
+    
+    def get_video_analysis(self, analysis_id):
+        """
+        Récupère une analyse vidéo par son ID
+        
+        Args:
+            analysis_id (str): Identifiant de l'analyse
+        
+        Returns:
+            dict: Données de l'analyse ou None si non trouvée
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT id, source_name, timestamp, results
+            FROM video_analyses
+            WHERE id = ?
+            ''', (analysis_id,))
+            
+            row = cursor.fetchone()
+            
+            if not row:
+                return None
+            
+            # Convertir le JSON en liste
+            row_dict = dict(row)
+            row_dict['results'] = json.loads(row_dict['results'])
+            
+            return row_dict
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération de l'analyse vidéo: {str(e)}")
+            return None
+    
+    def get_all_video_analyses(self, limit=100, offset=0):
+        """
+        Récupère toutes les analyses vidéo avec pagination
+        
+        Args:
+            limit (int, optional): Nombre maximum d'analyses à récupérer. Défaut à 100.
+            offset (int, optional): Décalage pour la pagination. Défaut à 0.
+        
+        Returns:
+            list: Liste des analyses vidéo
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT id, source_name, timestamp
+            FROM video_analyses
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+            ''', (limit, offset))
+            
+            # Ne pas inclure les résultats complets pour des raisons de performance
+            analyses = [dict(row) for row in cursor.fetchall()]
+            
+            return analyses
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération des analyses vidéo: {str(e)}")
+            return []
+    
+    def get_video_analyses_by_source(self, source_name, limit=100, offset=0):
+        """
+        Récupère les analyses vidéo pour une source donnée
+        
+        Args:
+            source_name (str): Nom de la source vidéo
+            limit (int, optional): Nombre maximum d'analyses à récupérer. Défaut à 100.
+            offset (int, optional): Décalage pour la pagination. Défaut à 0.
+        
+        Returns:
+            list: Liste des analyses vidéo
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT id, source_name, timestamp
+            FROM video_analyses
+            WHERE source_name = ?
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+            ''', (source_name, limit, offset))
+            
+            # Ne pas inclure les résultats complets pour des raisons de performance
+            analyses = [dict(row) for row in cursor.fetchall()]
+            
+            return analyses
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération des analyses vidéo: {str(e)}")
+            return []
+    
+    def delete_video_analysis(self, analysis_id):
+        """
+        Supprime une analyse vidéo
+        
+        Args:
+            analysis_id (str): Identifiant de l'analyse
+        
+        Returns:
+            bool: True si l'opération a réussi, False sinon
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            DELETE FROM video_analyses
+            WHERE id = ?
+            ''', (analysis_id,))
+            
+            affected_rows = cursor.rowcount
+            conn.commit()
+            
+            if affected_rows > 0:
+                self.logger.info(f"Analyse vidéo supprimée avec succès (ID: {analysis_id})")
+                return True
+            else:
+                self.logger.warning(f"Aucune analyse vidéo trouvée avec l'ID: {analysis_id}")
+                return False
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la suppression de l'analyse vidéo: {str(e)}")
+            return False
+    
+    def get_video_analysis_count(self):
+        """
+        Compte le nombre total d'analyses vidéo
+        
+        Returns:
+            int: Nombre d'analyses vidéo
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM video_analyses')
+            
+            return cursor.fetchone()[0]
+        except Exception as e:
+            self.logger.error(f"Erreur lors du comptage des analyses vidéo: {str(e)}")
+            return 0
+    
+    # Méthodes utilitaires
+    
+    def vacuum_database(self):
+        """
+        Réorganise la base de données pour optimiser l'espace disque
+        
+        Returns:
+            bool: True si l'opération a réussi, False sinon
+        """
+        try:
+            conn = self.get_connection()
+            conn.execute('VACUUM')
+            
+            self.logger.info("Base de données réorganisée avec succès")
+            return True
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la réorganisation de la base de données: {str(e)}")
+            return False
