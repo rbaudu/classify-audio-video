@@ -1,1 +1,1 @@
-# Ce fichier indique que le répertoire analysis est un package Python
+# Fichier d'initialisation du package analysis
