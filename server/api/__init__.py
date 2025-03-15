@@ -1,1 +1,1 @@
-# Ce fichier indique que le répertoire api est un package Python
+# Fichier d'initialisation du package api
