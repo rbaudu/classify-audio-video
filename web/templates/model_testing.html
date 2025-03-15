@@ -22,119 +22,218 @@
 
     <main class="container model-testing">
         <h1>Test du modèle de classification</h1>
+
+        <!-- Tabs pour choisir entre flux en direct et fichiers vidéo -->
+        <div class="test-tabs">
+            <button class="tab-btn active" data-tab="live-stream">Flux en direct</button>
+            <button class="tab-btn" data-tab="video-file">Fichiers vidéo</button>
+        </div>
         
-        <div class="testing-grid">
-            <div class="testing-card preview-card">
-                <h2>Aperçu en direct</h2>
-                <div class="preview-container">
-                    <div class="video-preview">
-                        <div class="video-feed" id="video-feed">
-                            <div class="no-feed-message">Flux vidéo non disponible</div>
+        <!-- Section de test avec flux en direct -->
+        <div class="tab-content active" id="live-stream">
+            <div class="testing-grid">
+                <div class="testing-card preview-card">
+                    <h2>Aperçu en direct</h2>
+                    <div class="preview-container">
+                        <div class="video-preview">
+                            <div class="video-feed" id="video-feed">
+                                <div class="no-feed-message">Flux vidéo non disponible</div>
+                            </div>
+                            <div class="preview-controls">
+                                <button id="refresh-feed" class="btn small">Rafraîchir</button>
+                            </div>
                         </div>
-                        <div class="preview-controls">
-                            <button id="refresh-feed" class="btn small">Rafraîchir</button>
+                        
+                        <div class="audio-preview">
+                            <div class="audio-visualizer" id="audio-visualizer">
+                                <div class="no-audio-message">Flux audio non disponible</div>
+                            </div>
+                            <div class="preview-controls">
+                                <button id="mute-audio" class="btn small">Muter</button>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div class="audio-preview">
-                        <div class="audio-visualizer" id="audio-visualizer">
-                            <div class="no-audio-message">Flux audio non disponible</div>
+                </div>
+                
+                <div class="testing-card classification-card">
+                    <h2>Résultat de classification</h2>
+                    <div class="classification-result">
+                        <div class="result-activity">
+                            <div class="activity-label">Activité détectée:</div>
+                            <div class="activity-value" id="detected-activity">-</div>
                         </div>
-                        <div class="preview-controls">
-                            <button id="mute-audio" class="btn small">Muter</button>
+                        
+                        <div class="confidence-levels">
+                            <h3>Niveau de confiance par activité</h3>
+                            <div class="confidence-bars" id="confidence-bars">
+                                <!-- Les barres de confiance seront générées par JavaScript -->
+                            </div>
                         </div>
+                        
+                        <div class="classification-controls">
+                            <button id="run-classification" class="btn primary">Classifier maintenant</button>
+                            <div class="auto-update">
+                                <input type="checkbox" id="auto-update" name="auto-update">
+                                <label for="auto-update">Mise à jour automatique (5s)</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="testing-card features-card">
+                    <h2>Caractéristiques détectées</h2>
+                    <div class="features-container">
+                        <div class="features-section">
+                            <h3>Caractéristiques vidéo</h3>
+                            <table class="features-table" id="video-features">
+                                <tr>
+                                    <td>Mouvement</td>
+                                    <td id="motion-value">0%</td>
+                                </tr>
+                                <tr>
+                                    <td>Détection de peau</td>
+                                    <td id="skin-value">0%</td>
+                                </tr>
+                                <tr>
+                                    <td>Luminosité</td>
+                                    <td id="brightness-value">0</td>
+                                </tr>
+                                <!-- Autres caractéristiques vidéo -->
+                            </table>
+                        </div>
+                        
+                        <div class="features-section">
+                            <h3>Caractéristiques audio</h3>
+                            <table class="features-table" id="audio-features">
+                                <tr>
+                                    <td>Niveau sonore</td>
+                                    <td id="audio-level-value">0</td>
+                                </tr>
+                                <tr>
+                                    <td>Fréquence dominante</td>
+                                    <td id="dominant-freq-value">0 Hz</td>
+                                </tr>
+                                <tr>
+                                    <td>Parole détectée</td>
+                                    <td id="speech-detected-value">Non</td>
+                                </tr>
+                                <!-- Autres caractéristiques audio -->
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="testing-card model-info-card">
+                    <h2>Informations sur le modèle</h2>
+                    <div class="model-info">
+                        <div class="info-item">
+                            <div class="info-label">Modèle utilisé:</div>
+                            <div class="info-value" id="model-name">Classificateur basé sur des règles</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Précision estimée:</div>
+                            <div class="info-value" id="model-accuracy">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Dernière mise à jour:</div>
+                            <div class="info-value" id="model-last-update">-</div>
+                        </div>
+                    </div>
+                    <div class="model-actions">
+                        <button id="retrain-model" class="btn">Réentraîner le modèle</button>
+                        <button id="export-model" class="btn">Exporter le modèle</button>
+                        <button id="import-model" class="btn">Importer un modèle</button>
                     </div>
                 </div>
             </div>
-            
-            <div class="testing-card classification-card">
-                <h2>Résultat de classification</h2>
-                <div class="classification-result">
-                    <div class="result-activity">
-                        <div class="activity-label">Activité détectée:</div>
-                        <div class="activity-value" id="detected-activity">-</div>
+        </div>
+        
+        <!-- Section de test avec fichiers vidéo -->
+        <div class="tab-content" id="video-file">
+            <div class="video-testing-container">
+                <div class="media-sources-section">
+                    <h2>Sources média disponibles</h2>
+                    
+                    <div class="media-selection">
+                        <select id="media-source-select" class="media-source-select">
+                            <option value="">Sélectionnez une source vidéo</option>
+                            <!-- Les options seront générées par JavaScript -->
+                        </select>
+                        
+                        <button id="refresh-sources" class="btn small">Rafraîchir les sources</button>
                     </div>
                     
-                    <div class="confidence-levels">
-                        <h3>Niveau de confiance par activité</h3>
-                        <div class="confidence-bars" id="confidence-bars">
-                            <!-- Les barres de confiance seront générées par JavaScript -->
+                    <div class="media-info" id="media-info">
+                        <p>Sélectionnez une source vidéo pour commencer.</p>
+                    </div>
+                </div>
+                
+                <div class="media-preview-section">
+                    <h2>Aperçu du média</h2>
+                    
+                    <div class="media-preview">
+                        <div class="video-preview" id="media-preview">
+                            <div class="no-media-message">Aucun média sélectionné</div>
                         </div>
                     </div>
                     
-                    <div class="classification-controls">
-                        <button id="run-classification" class="btn primary">Classifier maintenant</button>
-                        <div class="auto-update">
-                            <input type="checkbox" id="auto-update" name="auto-update">
-                            <label for="auto-update">Mise à jour automatique (5s)</label>
+                    <div class="media-controls">
+                        <button id="media-play" class="btn small">Lecture</button>
+                        <button id="media-pause" class="btn small">Pause</button>
+                        <button id="media-restart" class="btn small">Redémarrer</button>
+                        
+                        <div class="media-progress">
+                            <input type="range" id="media-progress-bar" min="0" max="100" value="0" class="progress-slider">
+                            <div class="time-display">
+                                <span id="current-time">00:00</span> / <span id="total-time">00:00</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            
-            <div class="testing-card features-card">
-                <h2>Caractéristiques détectées</h2>
-                <div class="features-container">
-                    <div class="features-section">
-                        <h3>Caractéristiques vidéo</h3>
-                        <table class="features-table" id="video-features">
-                            <tr>
-                                <td>Mouvement</td>
-                                <td id="motion-value">0%</td>
-                            </tr>
-                            <tr>
-                                <td>Détection de peau</td>
-                                <td id="skin-value">0%</td>
-                            </tr>
-                            <tr>
-                                <td>Luminosité</td>
-                                <td id="brightness-value">0</td>
-                            </tr>
-                            <!-- Autres caractéristiques vidéo -->
-                        </table>
+                
+                <div class="analysis-options-section">
+                    <h2>Options d'analyse</h2>
+                    
+                    <div class="analysis-options">
+                        <div class="option-row">
+                            <label>
+                                <input type="checkbox" id="save-analysis" checked>
+                                Sauvegarder les résultats dans la base de données
+                            </label>
+                        </div>
+                        
+                        <div class="option-row">
+                            <label>
+                                <input type="checkbox" id="generate-timeline" checked>
+                                Générer une timeline d'activités
+                            </label>
+                        </div>
+                        
+                        <div class="option-row">
+                            <label>Intervalle d'échantillonnage:</label>
+                            <select id="sample-interval">
+                                <option value="1">1 seconde</option>
+                                <option value="2">2 secondes</option>
+                                <option value="5" selected>5 secondes</option>
+                                <option value="10">10 secondes</option>
+                                <option value="30">30 secondes</option>
+                            </select>
+                        </div>
                     </div>
                     
-                    <div class="features-section">
-                        <h3>Caractéristiques audio</h3>
-                        <table class="features-table" id="audio-features">
-                            <tr>
-                                <td>Niveau sonore</td>
-                                <td id="audio-level-value">0</td>
-                            </tr>
-                            <tr>
-                                <td>Fréquence dominante</td>
-                                <td id="dominant-freq-value">0 Hz</td>
-                            </tr>
-                            <tr>
-                                <td>Parole détectée</td>
-                                <td id="speech-detected-value">Non</td>
-                            </tr>
-                            <!-- Autres caractéristiques audio -->
-                        </table>
+                    <div class="analysis-actions">
+                        <button id="analyze-video" class="btn primary">Analyser la vidéo complète</button>
+                        <button id="single-frame-analysis" class="btn">Analyser cette image</button>
                     </div>
                 </div>
-            </div>
-            
-            <div class="testing-card model-info-card">
-                <h2>Informations sur le modèle</h2>
-                <div class="model-info">
-                    <div class="info-item">
-                        <div class="info-label">Modèle utilisé:</div>
-                        <div class="info-value" id="model-name">Classificateur basé sur des règles</div>
+                
+                <div class="previous-analyses-section">
+                    <h2>Analyses précédentes</h2>
+                    
+                    <div class="previous-analyses" id="previous-analyses">
+                        <p>Chargement des analyses précédentes...</p>
+                        <!-- Liste des analyses précédentes générée par JavaScript -->
                     </div>
-                    <div class="info-item">
-                        <div class="info-label">Précision estimée:</div>
-                        <div class="info-value" id="model-accuracy">-</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Dernière mise à jour:</div>
-                        <div class="info-value" id="model-last-update">-</div>
-                    </div>
-                </div>
-                <div class="model-actions">
-                    <button id="retrain-model" class="btn">Réentraîner le modèle</button>
-                    <button id="export-model" class="btn">Exporter le modèle</button>
-                    <button id="import-model" class="btn">Importer un modèle</button>
                 </div>
             </div>
         </div>
@@ -146,5 +245,148 @@
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/model_testing.js') }}"></script>
+    
+    <style>
+        /* Styles spécifiques pour les onglets */
+        .test-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .tab-btn {
+            padding: 10px 20px;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s;
+        }
+        
+        .tab-btn.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+        }
+        
+        .tab-btn:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Styles pour la section de fichiers vidéo */
+        .video-testing-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-gap: 30px;
+        }
+        
+        .media-sources-section, 
+        .media-preview-section, 
+        .analysis-options-section, 
+        .previous-analyses-section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .media-selection {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .media-source-select {
+            flex-grow: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .media-info {
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .media-preview {
+            height: 300px;
+            background-color: #000;
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+        
+        .no-media-message {
+            color: #ccc;
+            font-size: 16px;
+        }
+        
+        .media-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .media-progress {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: 15px;
+        }
+        
+        .progress-slider {
+            flex-grow: 1;
+            height: 6px;
+        }
+        
+        .time-display {
+            font-size: 14px;
+            font-family: monospace;
+            white-space: nowrap;
+        }
+        
+        .analysis-options {
+            margin-bottom: 20px;
+        }
+        
+        .option-row {
+            margin-bottom: 12px;
+        }
+        
+        .analysis-actions {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .previous-analyses {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
 </body>
 </html>
