@@ -6,6 +6,9 @@ import json
 import requests
 from datetime import datetime
 
+# Import de la configuration
+from server import EXTERNAL_SERVICE_URL, EXTERNAL_SERVICE_API_KEY
+
 logger = logging.getLogger(__name__)
 
 class ExternalServiceClient:
@@ -14,44 +17,51 @@ class ExternalServiceClient:
     Responsable d'envoyer les résultats de classification d'activité.
     """
     
-    def __init__(self, service_url, api_key=None, timeout=10):
+    def __init__(self, service_url=None, api_key=None, timeout=10):
         """
         Initialise le client de service externe.
         
         Args:
-            service_url (str): URL du service externe
-            api_key (str, optional): Clé API pour l'authentification
+            service_url (str, optional): URL du service externe. Si None, utilise la valeur de la configuration.
+            api_key (str, optional): Clé API pour l'authentification. Si None, utilise la valeur de la configuration.
             timeout (int, optional): Timeout pour les requêtes HTTP en secondes
         """
-        self.service_url = service_url
-        self.api_key = api_key
+        self.service_url = service_url or EXTERNAL_SERVICE_URL
+        self.api_key = api_key or EXTERNAL_SERVICE_API_KEY
         self.timeout = timeout
         
-        logger.info(f"Client de service externe initialisé avec l'URL {service_url}")
+        logger.info(f"Client de service externe initialisé avec l'URL {self.service_url}")
     
-    def send_activity(self, timestamp, activity, metadata=None):
+    def send_activity(self, activity_data):
         """
         Envoie les données d'activité au service externe.
         
         Args:
-            timestamp (int): Horodatage Unix de l'activité
-            activity (str): Type d'activité détectée
-            metadata (dict, optional): Métadonnées supplémentaires
+            activity_data (dict): Données d'activité complètes
             
         Returns:
             bool: True si l'envoi a réussi, False sinon
         """
+        if not activity_data:
+            logger.warning("Pas de données d'activité à envoyer")
+            return False
+        
         try:
+            # Extraire les infos essentielles de activity_data
+            timestamp = activity_data.get('timestamp')
+            activity = activity_data.get('activity')
+            
+            if not timestamp or not activity:
+                logger.warning("Données d'activité incomplètes")
+                return False
+            
             # Préparation des données à envoyer
             payload = {
                 'timestamp': timestamp,
                 'date_time': datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S'),
-                'activity': activity
+                'activity': activity,
+                'metadata': activity_data.get('features', {})
             }
-            
-            # Ajout des métadonnées si présentes
-            if metadata:
-                payload['metadata'] = metadata
             
             # Préparation des headers
             headers = {
