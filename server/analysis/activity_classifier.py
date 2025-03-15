@@ -4,9 +4,13 @@
 import logging
 import numpy as np
 import os
+import time
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import cv2
+
+# Import de la configuration
+from server import ACTIVITY_CLASSES, MODEL_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -16,34 +20,34 @@ class ActivityClassifier:
     Utilise un modèle de deep learning pour identifier l'activité parmi les catégories prédéfinies.
     """
     
-    def __init__(self, model_path=None):
+    def __init__(self, obs_capture, stream_processor, db_manager, model_path=None):
         """
         Initialise le classificateur d'activité.
         
         Args:
+            obs_capture: Instance de OBSCapture pour capturer les images et l'audio
+            stream_processor: Instance de StreamProcessor pour traiter les données
+            db_manager: Instance de DBManager pour accéder à la base de données
             model_path (str, optional): Chemin vers le modèle de classification pré-entraîné.
-                Si None, utilise un modèle de règles prédéfinies simple.
+                Si None, utilise le chemin défini dans la configuration ou un modèle de règles prédéfinies simple.
         """
-        self.model_path = model_path
+        self.obs_capture = obs_capture
+        self.stream_processor = stream_processor
+        self.db_manager = db_manager
+        
+        # Utiliser le model_path passé ou celui de la configuration
+        self.model_path = model_path or MODEL_PATH
         self.model = None
         self.rule_based = False
         
         # Liste des catégories d'activité
-        self.activity_classes = [
-            'endormi',
-            'à table',
-            'lisant',
-            'au téléphone',
-            'en conversation',
-            'occupé',
-            'inactif'
-        ]
+        self.activity_classes = ACTIVITY_CLASSES
         
         # Chargement du modèle s'il est spécifié
-        if model_path and os.path.exists(model_path):
+        if self.model_path and os.path.exists(self.model_path):
             try:
-                self.model = load_model(model_path)
-                logger.info(f"Modèle de classification chargé depuis {model_path}")
+                self.model = load_model(self.model_path)
+                logger.info(f"Modèle de classification chargé depuis {self.model_path}")
             except Exception as e:
                 logger.error(f"Erreur lors du chargement du modèle: {str(e)}")
                 self.rule_based = True
@@ -52,29 +56,77 @@ class ActivityClassifier:
             self.rule_based = True
             logger.info("Modèle non spécifié ou introuvable. Utilisation du classificateur basé sur des règles prédéfinies")
     
-    def classify(self, video_data, audio_data):
+    def analyze_current_activity(self):
         """
-        Classifie l'activité à partir des données vidéo et audio traitées.
+        Capture et analyse l'activité courante
+        
+        Returns:
+            dict: Résultat de la classification ou None en cas d'erreur
+        """
+        try:
+            # Capturer une image
+            frame = self.obs_capture.get_current_frame()
+            
+            # Capturer l'audio
+            audio_data = self.obs_capture.get_current_audio()
+            
+            if frame is None or audio_data is None:
+                logger.warning("Impossible de capturer l'image ou l'audio")
+                return None
+            
+            # Traiter les données
+            video_features = self.stream_processor.process_video(frame)
+            audio_features = self.stream_processor.process_audio(audio_data)
+            
+            # Classifier l'activité
+            result = self.classify_activity(video_features, audio_features)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse de l'activité courante: {str(e)}")
+            return None
+    
+    def classify_activity(self, video_features, audio_features):
+        """
+        Classifie l'activité à partir des caractéristiques vidéo et audio
         
         Args:
-            video_data (dict): Données vidéo traitées (image + caractéristiques)
-            audio_data (dict): Données audio traitées (signal + caractéristiques)
+            video_features (dict): Caractéristiques vidéo extraites
+            audio_features (dict): Caractéristiques audio extraites
             
         Returns:
-            str: Catégorie d'activité détectée
+            dict: Résultat de la classification
         """
-        if video_data is None or audio_data is None:
-            logger.warning("Données vidéo ou audio manquantes pour la classification")
-            return 'inactif'
+        if video_features is None or audio_features is None:
+            logger.warning("Caractéristiques vidéo ou audio manquantes")
+            return None
         
         try:
+            # Détermination de l'activité
             if self.rule_based:
-                return self._rule_based_classification(video_data, audio_data)
+                activity = self._rule_based_classification(video_features, audio_features)
+                confidence = 0.7  # Confiance fixe pour la méthode basée sur les règles
+                confidence_scores = {cls: 0.1 for cls in self.activity_classes}
+                confidence_scores[activity] = confidence
             else:
-                return self._model_based_classification(video_data, audio_data)
+                activity, confidence, confidence_scores = self._model_based_classification(video_features, audio_features)
+            
+            # Résultat sous forme de dictionnaire
+            result = {
+                'activity': activity,
+                'confidence': confidence,
+                'confidence_scores': confidence_scores,
+                'timestamp': int(time.time()),
+                'features': {
+                    'video': video_features.get('features', {}),
+                    'audio': audio_features.get('features', {})
+                }
+            }
+            
+            return result
         except Exception as e:
             logger.error(f"Erreur lors de la classification: {str(e)}")
-            return 'inactif'  # Activité par défaut en cas d'erreur
+            return None
     
     def _rule_based_classification(self, video_data, audio_data):
         """
@@ -148,17 +200,10 @@ class ActivityClassifier:
             audio_data (dict): Données audio traitées
             
         Returns:
-            str: Catégorie d'activité détectée
+            tuple: (activité détectée, niveau de confiance, scores pour toutes les classes)
         """
         # Préparation des données pour le modèle
         video_frame = video_data.get('processed_frame')
-        audio_signal = audio_data.get('processed_audio')
-        
-        # Selon l'architecture du modèle, la préparation peut varier
-        # Exemple pour un modèle qui attend une image et un ensemble de caractéristiques audio
-        
-        # Préparation de l'image (ajout de la dimension de batch)
-        input_image = np.expand_dims(video_frame, axis=0)
         
         # Extraction et préparation des caractéristiques audio importantes
         audio_features = []
@@ -169,21 +214,43 @@ class ActivityClassifier:
         
         # Normalisation des caractéristiques audio (exemple simplifié)
         audio_features = np.array(audio_features, dtype=np.float32)
-        audio_features = np.expand_dims(audio_features, axis=0)  # Ajout de la dimension de batch
         
-        # Prédiction avec le modèle
-        # Note: l'interface exacte dépend de l'architecture de votre modèle
-        predictions = self.model.predict([input_image, audio_features])
+        # Préparation de l'image (ajout de la dimension de batch)
+        input_image = np.expand_dims(video_frame, axis=0)
         
-        # Obtention de la classe prédite
-        predicted_class_idx = np.argmax(predictions[0])
+        # Ajout de la dimension de batch pour l'audio
+        audio_features = np.expand_dims(audio_features, axis=0)
         
-        # Vérification que l'index est valide
-        if 0 <= predicted_class_idx < len(self.activity_classes):
-            return self.activity_classes[predicted_class_idx]
-        else:
-            logger.warning(f"Index de classe prédit invalide: {predicted_class_idx}")
-            return 'inactif'
+        try:
+            # Prédiction avec le modèle
+            predictions = self.model.predict([input_image, audio_features])
+            
+            # Obtention de la classe prédite
+            predicted_class_idx = np.argmax(predictions[0])
+            confidence = float(predictions[0][predicted_class_idx])
+            
+            # Vérification que l'index est valide
+            if 0 <= predicted_class_idx < len(self.activity_classes):
+                activity = self.activity_classes[predicted_class_idx]
+            else:
+                logger.warning(f"Index de classe prédit invalide: {predicted_class_idx}")
+                activity = 'inactif'
+                confidence = 0.5
+            
+            # Conversion des scores en dictionnaire
+            all_scores = {self.activity_classes[i]: float(score) for i, score in enumerate(predictions[0]) if i < len(self.activity_classes)}
+            
+            return activity, confidence, all_scores
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la classification par modèle: {str(e)}")
+            # Fallback sur la méthode basée sur des règles
+            activity = self._rule_based_classification(video_data, audio_data)
+            confidence = 0.5  # Confiance réduite puisque c'est une solution de repli
+            all_scores = {cls: 0.1 for cls in self.activity_classes}
+            all_scores[activity] = confidence
+            
+            return activity, confidence, all_scores
     
     def train(self, training_data, epochs=10, batch_size=32, validation_split=0.2, save_path=None):
         """
