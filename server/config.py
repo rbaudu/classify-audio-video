@@ -12,8 +12,8 @@ class Config:
     
     # Configuration OBS
     OBS_HOST = os.environ.get('OBS_HOST') or 'localhost'
-    OBS_PORT = int(os.environ.get('OBS_PORT') or 4444)
-    OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or ''
+    OBS_PORT = int(os.environ.get('OBS_PORT') or 4455)
+    OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or 'Me2Fai800h1VwthV'
     
     # Configuration des chemins
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
