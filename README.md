@@ -1,7 +1,7 @@
 # Classify Audio Video
 
 ## Présentation
-Classify Audio Video est une application qui capture et analyse les flux audio et vidéo provenant d'OBS Studio pour classifier automatiquement l'activité d'une personne. L'application détecte 7 types d'activités différentes (endormi, à table, lisant, au téléphone, en conversation, occupé, inactif) et envoie le résultat vers un service externe toutes les 5 minutes.
+Classify Audio Video est une application qui capture et analyse les flux audio et vidéo provenant d'OBS Studio pour classifier automatiquement l'activité d'une personne. L'application détecte 7 types d'activités différentes (endormi, à table, lisant, au téléphone, en conversation, occupé, inactif) et envoie le résultat vers un service externe toutes les 5 minutes. En plus des flux en direct, l'application prend désormais en charge l'analyse de fichiers vidéo chargés dans OBS.
 
 ## Fonctionnalités principales
 
@@ -12,6 +12,7 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 - **Statistiques** : Analyse des tendances, durées et fréquences des activités
 - **Interface web** : Visualisation des données et tableaux de bord en temps réel
 - **API externe** : Envoi des résultats vers un service tiers via HTTP POST
+- **Analyse de fichiers vidéo** : Prise en charge des fichiers médias chargés dans OBS pour analyse complète ou image par image
 
 ## Structure du projet
 
@@ -42,7 +43,10 @@ classify-audio-video/
 │   │   ├── dashboard.html        # Tableau de bord
 │   │   ├── statistics.html       # Statistiques d'activité
 │   │   ├── history.html          # Historique des activités
-│   │   └── model_testing.html    # Test du modèle de classification
+│   │   ├── model_testing.html    # Test du modèle de classification
+│   │   ├── analysis_results.html # Résultats d'analyse vidéo
+│   │   ├── analysis_in_progress.html # Suivi d'analyse en cours
+│   │   └── error.html            # Page d'erreur
 │   └── static/                   # Ressources statiques
 │       ├── css/                  # Feuilles de style
 │       │   └── main.css          # Style principal
@@ -53,7 +57,8 @@ classify-audio-video/
 │           ├── statistics.js     # Script des statistiques
 │           └── model_testing.js  # Script de test du modèle
 ├── data/                         # Stockage des données
-│   └── activity.db               # Base de données SQLite (générée à l'exécution)
+│   ├── activity.db               # Base de données SQLite (générée à l'exécution)
+│   └── analyses/                 # Dossier pour les analyses vidéo temporaires
 └── models/                       # Modèles de classification pré-entraînés
     └── activity_classifier.h5    # Modèle de classification (à fournir)
 ```
@@ -112,16 +117,25 @@ Pour que OBS Studio fonctionne correctement avec cette application, suivez ces �
      - "Capture audio d'entrée" pour un microphone
      - et/ou "Capture audio de sortie" pour l'audio du système
 
-4. **Vérifier que les sources sont actives** :
+4. **Ajouter des fichiers médias (pour l'analyse de vidéos)** :
+   - Dans OBS Studio, cliquez sur le bouton "+" dans le panneau Sources
+   - Sélectionnez "Source multimédia" (ou Media Source)
+   - Donnez un nom à la source (par exemple "Vidéo test")
+   - Cochez "Fichier local" et cliquez sur "Parcourir" pour sélectionner votre fichier vidéo
+   - Vous pouvez ajuster les options comme la mise en boucle, le volume, etc.
+   - Cliquez sur "OK" pour ajouter la source
+
+5. **Vérifier que les sources sont actives** :
    - Assurez-vous que vos sources vidéo et audio ne sont pas muettes ou masquées
    - Vérifiez que les dispositifs de capture fonctionnent correctement
+   - Pour les fichiers médias, assurez-vous qu'ils sont visibles dans la prévisualisation
 
-5. **Configuration recommandée pour de meilleures performances** :
+6. **Configuration recommandée pour de meilleures performances** :
    - Résolution vidéo : configurez une résolution moyenne (640x480 ou 720p) pour réduire la charge de traitement
    - Fréquence d'images : 15-30 FPS est suffisant pour l'analyse d'activité
    - Qualité audio : 44.1kHz, Mono est généralement suffisant
 
-6. **Mettre à jour la configuration du programme** :
+7. **Mettre à jour la configuration du programme** :
    - Modifiez le fichier `server/config.py` pour correspondre à vos paramètres OBS :
      ```python
      OBS_HOST = 'localhost'  # ou l'adresse IP si OBS est sur une autre machine
@@ -129,7 +143,7 @@ Pour que OBS Studio fonctionne correctement avec cette application, suivez ces �
      OBS_PASSWORD = 'votre-mot-de-passe'  # laissez vide si vous n'avez pas défini de mot de passe
      ```
 
-7. **Test de connexion** :
+8. **Test de connexion** :
    - Lancez OBS Studio
    - Lancez votre application Classify Audio Video
    - Vérifiez les journaux de l'application pour confirmer que la connexion est établie
@@ -152,6 +166,14 @@ http://localhost:5000
    - Classifier l'activité toutes les 5 minutes
    - Envoyer les résultats au service externe configuré
 
+4. Pour analyser des fichiers vidéo :
+   - Accédez à l'onglet "Test du modèle"
+   - Basculez vers l'onglet "Fichiers vidéo"
+   - Sélectionnez une source média dans la liste déroulante
+   - Utilisez les contrôles de lecture pour naviguer dans la vidéo
+   - Cliquez sur "Analyser cette image" pour classifier l'image actuelle
+   - Ou cliquez sur "Analyser la vidéo complète" pour une analyse de toute la vidéo
+
 ## Fonctionnement technique
 
 ### Capture de flux
@@ -159,6 +181,7 @@ http://localhost:5000
 La classe `OBSCapture` établit une connexion WebSocket avec OBS Studio et capture :
 - Les images de la source vidéo (webcam ou capture d'écran)
 - Les données audio du microphone ou de l'audio système
+- Les frames des fichiers vidéo chargés dans OBS
 
 ### Traitement des flux
 
@@ -189,6 +212,20 @@ Le `DBManager` gère une base de données SQLite qui stocke :
 - Le type d'activité détecté
 - Le niveau de confiance de la classification
 - Les métadonnées supplémentaires
+- Les résultats complets des analyses de vidéo
+
+### Analyse de fichiers vidéo
+
+Le processus d'analyse de fichiers vidéo fonctionne comme suit :
+1. L'utilisateur sélectionne un fichier média chargé dans OBS
+2. L'utilisateur peut choisir entre :
+   - **Analyse d'une image** : Classification de l'image actuellement visible
+   - **Analyse complète** : La vidéo est échantillonnée à intervalles réguliers (configurable)
+3. Pour l'analyse complète :
+   - Une tâche d'arrière-plan est lancée pour analyser la vidéo
+   - L'utilisateur est redirigé vers une page de suivi de progression
+   - Une fois l'analyse terminée, les résultats sont affichés avec des graphiques et statistiques
+   - Les résultats peuvent être exportés en CSV ou JSON
 
 ### Envoi au service externe
 
@@ -211,6 +248,9 @@ L'interface web offre plusieurs vues :
 3. **Statistiques** : Analyse détaillée des données collectées (graphiques, tendances)
 4. **Historique** : Journal chronologique des activités détectées
 5. **Test du modèle** : Interface pour tester et affiner le modèle de classification
+   - Onglet **Flux en direct** : Analyse du flux vidéo/audio en temps réel
+   - Onglet **Fichiers vidéo** : Contrôle et analyse des fichiers médias chargés dans OBS
+6. **Résultats d'analyse** : Affiche les résultats détaillés d'une analyse vidéo complète
 
 ### Fonctionnalités des scripts JavaScript
 
@@ -245,12 +285,19 @@ L'interface web offre plusieurs vues :
 - Exportation des données au format CSV et JSON
 
 #### model_testing.js
-- Affichage et contrôle des flux audio/vidéo en direct
-- **Visualisation des caractéristiques extraites**
-- Classification en temps réel et affichage des résultats
-- Niveaux de confiance pour chaque type d'activité
-- Gestion des informations sur le modèle
-- Fonctionnalités d'import/export et réentraînement du modèle
+- Gestion des onglets (flux en direct et fichiers vidéo)
+- **Flux en direct** :
+  - Affichage et contrôle des flux audio/vidéo en direct
+  - Visualisation des caractéristiques extraites
+  - Classification en temps réel et affichage des résultats
+  - Niveaux de confiance pour chaque type d'activité
+  - Fonctionnalités d'import/export et réentraînement du modèle
+- **Fichiers vidéo** :
+  - Listage et sélection des sources média disponibles dans OBS
+  - Contrôles de lecture (play, pause, restart, seek)
+  - Analyse d'une seule image ou de la vidéo complète
+  - Configuration des options d'analyse (intervalle, sauvegarde, timeline)
+  - Accès aux analyses précédentes
 
 ## Personnalisation
 
@@ -263,6 +310,13 @@ L'interface web offre plusieurs vues :
 ### Modifier la fréquence d'analyse
 
 Changez la valeur de `ANALYSIS_INTERVAL` dans `server/config.py` (en secondes)
+
+### Personnaliser l'analyse de fichiers vidéo
+
+Vous pouvez ajuster plusieurs paramètres pour l'analyse de fichiers vidéo :
+1. **Intervalle d'échantillonnage** : Modifiez les options dans `model_testing.html` ou la valeur par défaut dans `main.py`
+2. **Format d'exportation** : Ajoutez de nouveaux formats dans `main.py` et `analysis_results.html`
+3. **Visualisations** : Personnalisez les graphiques dans `analysis_results.html`
 
 ### Intégration avec d'autres services
 
@@ -278,6 +332,13 @@ Modifiez la classe `ExternalServiceClient` pour adapter le format des données e
 - Lancez OBS avant de démarrer l'application Classify Audio Video
 - Consultez les journaux de l'application pour identifier les problèmes de connexion spécifiques
 
+### Problèmes avec les fichiers vidéo
+
+- Assurez-vous que les formats des fichiers sont pris en charge par OBS (mp4, mov, avi, etc.)
+- Vérifiez que les sources média sont correctement ajoutées et visibles dans OBS
+- Si une analyse vidéo échoue, consultez les journaux d'OBS et de l'application
+- Pour les vidéos longues, augmentez l'intervalle d'échantillonnage pour réduire le temps d'analyse
+
 ### Erreurs de classification
 
 - Si le modèle de classification produit des résultats incorrects, essayez de réentraîner le modèle avec davantage de données
@@ -287,6 +348,7 @@ Modifiez la classe `ExternalServiceClient` pour adapter le format des données e
 
 - Pour les systèmes moins puissants, réduisez la résolution vidéo dans `config.py`
 - Augmentez l'intervalle d'analyse pour réduire l'utilisation du CPU
+- Pour l'analyse de fichiers vidéo, utilisez des valeurs d'échantillonnage plus élevées (10-30 secondes)
 
 ## Contribution
 
@@ -303,3 +365,4 @@ Ce projet est distribué sous licence MIT. Voir le fichier `LICENSE` pour plus d
 - [Flask](https://flask.palletsprojects.com/)
 - [TensorFlow](https://www.tensorflow.org/)
 - [OpenCV](https://opencv.org/)
+- [Chart.js](https://www.chartjs.org/)
