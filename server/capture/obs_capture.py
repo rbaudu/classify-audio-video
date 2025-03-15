@@ -9,13 +9,7 @@ from io import BytesIO
 from PIL import Image
 
 # Import de la configuration
-from ..config import (
-    OBS_HOST, 
-    OBS_PORT, 
-    OBS_PASSWORD,
-    VIDEO_SOURCE_NAME,
-    AUDIO_SOURCE_NAME
-)
+from server import OBS_HOST, OBS_PORT, OBS_PASSWORD, VIDEO_SOURCE_NAME, AUDIO_SOURCE_NAME
 
 class OBSCapture:
     """
