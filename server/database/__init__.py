@@ -1,1 +1,1 @@
-# Ce fichier indique que le répertoire database est un package Python
+# Fichier d'initialisation du package database
