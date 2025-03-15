@@ -20,8 +20,9 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 classify-audio-video/
 ├── README.md                     # Documentation du projet
 ├── requirements.txt              # Dépendances Python
+├── run.py                        # Point d'entrée principal pour lancer l'application
 ├── server/                       # Code du serveur principal
-│   ├── __init__.py               # Initialisation du module server
+│   ├── __init__.py               # Initialisation du module server et configuration centralisée
 │   ├── main.py                   # Point d'entrée de l'application
 │   ├── config.py                 # Configuration de l'application
 │   ├── analysis/                 # Module d'analyse et classification
@@ -138,9 +139,11 @@ Pour que OBS Studio fonctionne correctement avec cette application, suivez ces �
 7. **Mettre à jour la configuration du programme** :
    - Modifiez le fichier `server/config.py` pour correspondre à vos paramètres OBS :
      ```python
-     OBS_HOST = 'localhost'  # ou l'adresse IP si OBS est sur une autre machine
-     OBS_PORT = 4444  # le port que vous avez configuré
-     OBS_PASSWORD = 'votre-mot-de-passe'  # laissez vide si vous n'avez pas défini de mot de passe
+     class Config:
+         # ...
+         OBS_HOST = 'localhost'  # ou l'adresse IP si OBS est sur une autre machine
+         OBS_PORT = 4444  # le port que vous avez configuré
+         OBS_PASSWORD = 'votre-mot-de-passe'  # laissez vide si vous n'avez pas défini de mot de passe
      ```
 
 8. **Test de connexion** :
@@ -150,9 +153,9 @@ Pour que OBS Studio fonctionne correctement avec cette application, suivez ces �
 
 ## Utilisation
 
-1. Lancez l'application :
+1. Lancez l'application (utiliser toujours le fichier run.py) :
 ```bash
-python server/main.py
+python run.py
 ```
 
 2. Accédez à l'interface web via votre navigateur :
@@ -173,6 +176,44 @@ http://localhost:5000
    - Utilisez les contrôles de lecture pour naviguer dans la vidéo
    - Cliquez sur "Analyser cette image" pour classifier l'image actuelle
    - Ou cliquez sur "Analyser la vidéo complète" pour une analyse de toute la vidéo
+
+## Structure des importations
+
+L'application utilise un système d'importation centralisé pour faciliter la gestion des dépendances et éviter les problèmes d'importations cycliques :
+
+1. **Module principal `server/__init__.py`** :
+   - Importe toutes les configurations depuis `server/config.py`
+   - Expose ces configurations au niveau du package server
+   - Permet d'importer facilement les variables de configuration depuis n'importe quel module
+
+2. **Point d'entrée `run.py`** :
+   - Ajoute le chemin du projet au chemin de recherche Python (sys.path)
+   - Gère correctement les importations entre les différents modules
+   - **Toujours utiliser ce fichier pour démarrer l'application**
+
+3. **Exemples d'importation** :
+   - Pour accéder aux configurations :
+     ```python
+     from server import OBS_HOST, OBS_PORT, DB_PATH
+     ```
+   - Pour accéder aux classes :
+     ```python
+     from server.capture.obs_capture import OBSCapture
+     from server.database.db_manager import DBManager
+     ```
+
+4. **Pourquoi cette structure ?**
+   - Évite les problèmes d'importation relative (`from ..module import X`)
+   - Centralize la configuration
+   - Facilite la maintenance et l'évolution du code
+
+### Résolution des problèmes d'importation courants
+
+Si vous rencontrez des erreurs d'importation lors de l'exécution :
+
+1. **Toujours utiliser `python run.py`** au lieu de `python server/main.py`
+2. Vérifier que tous les fichiers `__init__.py` sont présents dans chaque dossier
+3. Préférer les importations absolues (`from server.xxx import X`) aux importations relatives
 
 ## Débogage avec ipdb
 
@@ -265,7 +306,7 @@ Pour déboguer les parties critiques de l'application :
 
 4. **Lancer l'application en mode débogage** :
    ```bash
-   python -m ipdb server/main.py
+   python -m ipdb run.py
    ```
 
 ## Débogage du serveur Flask
@@ -524,6 +565,13 @@ Vous pouvez ajuster plusieurs paramètres pour l'analyse de fichiers vidéo :
 Modifiez la classe `ExternalServiceClient` pour adapter le format des données et les méthodes de connexion à votre service tiers.
 
 ## Troubleshooting
+
+### Problèmes d'importation
+
+Si vous rencontrez des erreurs du type `ImportError: cannot import name X from Y` :
+- Vérifiez que vous lancez l'application via `python run.py`
+- N'exécutez jamais directement `python server/main.py` ou d'autres modules
+- Si le problème persiste, vérifiez les modules d'initialisation (`__init__.py`) de chaque package
 
 ### Problèmes de connexion OBS
 
