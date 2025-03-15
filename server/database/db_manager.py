@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 # Import de la configuration
-from ..config import DB_PATH
+from server import DB_PATH
 
 class DBManager:
     """
