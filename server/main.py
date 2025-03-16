@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify, render_template, send_from_directory
 import threading
 
 # Import des modules du projet
-from server.capture.obs_capture import OBSCapture
+from server.capture import SyncManager
 from server.capture.stream_processor import StreamProcessor
 from server.analysis.activity_classifier import ActivityClassifier
 from server.database.db_manager import DBManager
@@ -37,10 +37,10 @@ app = Flask(__name__,
            template_folder='../web/templates')
 
 # Initialisation des classes principales
-obs_capture = OBSCapture()
+sync_manager = SyncManager()  # Nouveau gestionnaire de synchronisation audio/vidéo
 stream_processor = StreamProcessor()
 db_manager = DBManager()
-activity_classifier = ActivityClassifier(obs_capture, stream_processor, db_manager)
+activity_classifier = ActivityClassifier(sync_manager, stream_processor, db_manager)
 external_service = ExternalServiceClient()
 
 # Thread pour l'analyse périodique
@@ -103,6 +103,7 @@ def analyze_video_task(analysis_id, source_name, save_analysis=True, generate_ti
         }
         
         # Obtenir les propriétés de la vidéo
+        obs_capture = sync_manager.obs_capture  # Accès à l'objet OBSCapture via le SyncManager
         properties = obs_capture.get_media_properties(source_name)
         if not properties or not properties.get('duration'):
             raise ValueError(f"Impossible de récupérer les propriétés de la vidéo {source_name}")
@@ -125,18 +126,18 @@ def analyze_video_task(analysis_id, source_name, save_analysis=True, generate_ti
             obs_capture.control_media(source_name, 'seek', current_time)
             time.sleep(0.5)  # Attendre que l'image se stabilise
             
-            # Capturer une image
-            frame = obs_capture.get_video_frame(source_name)
+            # Récupérer des données synchronisées
+            data = sync_manager.get_synchronized_data()
             
-            # Capturer l'audio (si disponible)
-            audio_data = obs_capture.get_audio_data(source_name)
-            
-            # Extraire les caractéristiques
-            video_features = stream_processor.process_video_frame(frame)
-            audio_features = stream_processor.process_audio_data(audio_data)
-            
-            # Classifier l'activité
-            classification = activity_classifier.classify_activity(video_features, audio_features)
+            if not data:
+                logger.warning(f"Impossible de récupérer des données à {current_time}s")
+                continue
+                
+            # Classifier l'activité en utilisant les données traitées
+            classification = activity_classifier.classify_activity(
+                data['video']['processed'],
+                data['audio']['processed']
+            )
             
             # Ajouter le temps à la classification
             result = {
@@ -146,8 +147,8 @@ def analyze_video_task(analysis_id, source_name, save_analysis=True, generate_ti
                 'timestamp': current_time,
                 'formatted_time': format_time(current_time),
                 'features': {
-                    'video': video_features,
-                    'audio': audio_features
+                    'video': data['video']['processed'].get('features', {}),
+                    'audio': data['audio']['processed'].get('features', {})
                 }
             }
             
@@ -500,10 +501,44 @@ def get_media_sources():
     Récupère la liste des sources média disponibles
     """
     try:
-        sources = obs_capture.get_media_sources()
+        sources = sync_manager.obs_capture.get_media_sources()
         return jsonify(sources)
     except Exception as e:
         logger.error(f"Erreur lors de la récupération des sources média: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/audio-devices', methods=['GET'])
+def get_audio_devices():
+    """
+    Récupère la liste des périphériques audio disponibles
+    """
+    try:
+        devices = sync_manager.get_audio_devices()
+        return jsonify(devices)
+    except Exception as e:
+        logger.error(f"Erreur lors de la récupération des périphériques audio: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/set-audio-device', methods=['POST'])
+def set_audio_device():
+    """
+    Change le périphérique audio de capture
+    """
+    try:
+        data = request.json
+        device_index = data.get('deviceIndex')
+        
+        if device_index is None:
+            return jsonify({"error": "Indice de périphérique requis"}), 400
+        
+        success = sync_manager.set_audio_device(int(device_index))
+        
+        if not success:
+            return jsonify({"error": "Impossible de changer de périphérique audio"}), 400
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Erreur lors du changement de périphérique audio: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/select-media-source', methods=['POST'])
@@ -518,7 +553,7 @@ def select_media_source():
         if not source_name:
             return jsonify({"error": "Nom de source requis"}), 400
         
-        success = obs_capture.select_media_source(source_name)
+        success = sync_manager.obs_capture.select_media_source(source_name)
         
         if not success:
             return jsonify({"error": "Impossible de sélectionner la source"}), 400
@@ -534,7 +569,7 @@ def get_media_properties(source_name):
     Récupère les propriétés d'une source média
     """
     try:
-        properties = obs_capture.get_media_properties(source_name)
+        properties = sync_manager.obs_capture.get_media_properties(source_name)
         
         if not properties:
             return jsonify({"error": "Impossible de récupérer les propriétés"}), 400
@@ -558,7 +593,7 @@ def control_media():
         if not source_name or not action:
             return jsonify({"error": "Nom de source et action requis"}), 400
         
-        success = obs_capture.control_media(source_name, action, position)
+        success = sync_manager.obs_capture.control_media(source_name, action, position)
         
         if not success:
             return jsonify({"error": f"Impossible d'effectuer l'action {action}"}), 400
@@ -574,7 +609,7 @@ def get_media_time(source_name):
     Récupère le temps actuel d'une source média
     """
     try:
-        time_info = obs_capture.get_media_time(source_name)
+        time_info = sync_manager.obs_capture.get_media_time(source_name)
         
         if not time_info:
             return jsonify({"error": "Impossible de récupérer le temps"}), 400
@@ -582,6 +617,26 @@ def get_media_time(source_name):
         return jsonify(time_info)
     except Exception as e:
         logger.error(f"Erreur lors de la récupération du temps: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/save-clip', methods=['POST'])
+def save_clip():
+    """
+    Sauvegarde un clip synchronisé audio/vidéo
+    """
+    try:
+        data = request.json
+        duration = data.get('duration', 5)
+        prefix = data.get('prefix', 'clip')
+        
+        result = sync_manager.save_synchronized_clip(duration, prefix)
+        
+        if not result or not result.get('success'):
+            return jsonify({"error": "Impossible de sauvegarder le clip"}), 400
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde du clip: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/analyze-full-video', methods=['POST'])
@@ -713,6 +768,12 @@ def start_server():
     Démarre le serveur Flask et la boucle d'analyse
     """
     global analysis_thread, analysis_running
+    
+    # Démarrer la capture synchronisée
+    if not sync_manager.start():
+        logger.error("Impossible de démarrer la capture synchronisée")
+    else:
+        logger.info("Capture synchronisée démarrée avec succès")
     
     # Démarrer la boucle d'analyse dans un thread
     analysis_running = True
