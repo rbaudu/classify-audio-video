@@ -106,7 +106,9 @@ class OBSCapture:
         
         try:
             # Récupérer la liste des sources
+            self.logger.info("Tentative de récupération des sources via GetSourcesList()")
             sources_response = self.ws.call(requests.GetSourcesList())
+            self.logger.info(f"Réponse de GetSourcesList(): {sources_response.datain}")
             sources = sources_response.getSources()
             
             # Filtrer les sources vidéo et média
@@ -117,6 +119,38 @@ class OBSCapture:
             self.logger.info(f"Sources média trouvées: {[s['name'] for s in self.media_sources]}")
         except Exception as e:
             self.logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
+            # Alternative: tenter d'utiliser GetInputList pour les versions récentes d'OBS
+            try:
+                self.logger.info("Tentative de récupération des sources via GetInputList() (OBS 28+)")
+                sources_response = self.ws.call(requests.GetInputList())
+                sources = sources_response.getInputs()
+                
+                self.logger.info(f"Sources récupérées via GetInputList(): {sources}")
+                
+                # Filtrer les sources vidéo et média
+                self.video_sources = []
+                self.media_sources = []
+                
+                for source in sources:
+                    kind = source.get('inputKind', '')
+                    name = source.get('inputName', '')
+                    
+                    # Adapter les types aux nouvelles conventions OBS v28+
+                    if kind in ['dshow_input', 'monitor_capture', 'window_capture', 'game_capture',
+                              'v4l2_input', 'av_capture_input', 'image_source', 'color_source',
+                              'browser_source', 'video_capture_device', 'display_capture']:
+                        self.video_sources.append({'name': name, 'typeId': kind})
+                    
+                    if kind in ['ffmpeg_source', 'vlc_source', 'media_source', 'media']:
+                        self.media_sources.append({'name': name, 'typeId': kind})
+                
+                self.logger.info(f"Sources vidéo trouvées (via GetInputList): {[s['name'] for s in self.video_sources]}")
+                self.logger.info(f"Sources média trouvées (via GetInputList): {[s['name'] for s in self.media_sources]}")
+            except Exception as e2:
+                self.logger.error(f"Échec également avec GetInputList: {str(e2)}")
+                # Par défaut, créer au moins une source virtuelle pour pouvoir continuer
+                self.video_sources = [{'name': 'Default Video Source', 'typeId': 'unknown'}]
+                self.media_sources = []
     
     def _is_video_source(self, type_id):
         """
@@ -125,7 +159,7 @@ class OBSCapture:
         video_types = [
             'dshow_input', 'monitor_capture', 'window_capture', 'game_capture',
             'v4l2_input', 'av_capture_input', 'image_source', 'color_source',
-            'browser_source'
+            'browser_source', 'video_capture_device', 'display_capture'
         ]
         return type_id in video_types
     
@@ -134,7 +168,7 @@ class OBSCapture:
         Vérifie si un type de source est une source média (fichier vidéo)
         """
         media_types = [
-            'ffmpeg_source', 'vlc_source', 'media_source'
+            'ffmpeg_source', 'vlc_source', 'media_source', 'media'
         ]
         return type_id in media_types
     
@@ -215,6 +249,7 @@ class OBSCapture:
         
         try:
             # Appel à l'API OBS pour récupérer une capture d'écran de la source
+            self.logger.info(f"Tentative de capture d'image pour la source: {source_name}")
             response = self.ws.call(requests.TakeSourceScreenshot(
                 sourceName=source_name,
                 embedPictureFormat="png",
@@ -241,7 +276,11 @@ class OBSCapture:
             return frame
         except Exception as e:
             self.logger.error(f"Erreur lors de la capture d'image: {str(e)}")
-            return None
+            
+            # Générer une image noire de remplacement pour éviter les erreurs en aval
+            dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+            self.logger.info("Génération d'une image noire de remplacement")
+            return dummy_frame
     
     def get_media_sources(self):
         """
