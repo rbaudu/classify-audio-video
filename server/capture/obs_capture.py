@@ -9,11 +9,11 @@ from io import BytesIO
 from PIL import Image
 
 # Import de la configuration
-from server import OBS_HOST, OBS_PORT, OBS_PASSWORD, VIDEO_SOURCE_NAME, AUDIO_SOURCE_NAME
+from server import OBS_HOST, OBS_PORT, OBS_PASSWORD, VIDEO_SOURCE_NAME
 
 class OBSCapture:
     """
-    Classe pour capturer les flux audio et vidéo depuis OBS Studio via le plugin websocket
+    Classe pour capturer les flux vidéo depuis OBS Studio via le plugin websocket
     """
     
     def __init__(self):
@@ -22,10 +22,8 @@ class OBSCapture:
         self.connected = False
         self.current_source = None
         self.video_sources = []
-        self.audio_sources = []
         self.media_sources = []
         self.current_frame = None
-        self.current_audio = None
         self.reconnect_thread = None
         self.reconnect_interval = 5  # secondes
         self.should_reconnect = True
@@ -111,13 +109,11 @@ class OBSCapture:
             sources_response = self.ws.call(requests.GetSourcesList())
             sources = sources_response.getSources()
             
-            # Filtrer les sources vidéo et audio
+            # Filtrer les sources vidéo et média
             self.video_sources = [s for s in sources if self._is_video_source(s['typeId'])]
-            self.audio_sources = [s for s in sources if self._is_audio_source(s['typeId'])]
             self.media_sources = [s for s in sources if self._is_media_source(s['typeId'])]
             
             self.logger.info(f"Sources vidéo trouvées: {[s['name'] for s in self.video_sources]}")
-            self.logger.info(f"Sources audio trouvées: {[s['name'] for s in self.audio_sources]}")
             self.logger.info(f"Sources média trouvées: {[s['name'] for s in self.media_sources]}")
         except Exception as e:
             self.logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
@@ -132,17 +128,6 @@ class OBSCapture:
             'browser_source'
         ]
         return type_id in video_types
-    
-    def _is_audio_source(self, type_id):
-        """
-        Vérifie si un type de source est une source audio
-        """
-        audio_types = [
-            'wasapi_input_capture', 'wasapi_output_capture', 'coreaudio_input_capture',
-            'coreaudio_output_capture', 'pulse_input_capture', 'pulse_output_capture',
-            'ffmpeg_source'
-        ]
-        return type_id in audio_types
     
     def _is_media_source(self, type_id):
         """
@@ -257,39 +242,6 @@ class OBSCapture:
         except Exception as e:
             self.logger.error(f"Erreur lors de la capture d'image: {str(e)}")
             return None
-    
-    def get_audio_data(self, source_name=None, duration_ms=500):
-        """
-        Récupère des données audio de la source spécifiée (non implémenté, simulé)
-        
-        Args:
-            source_name (str, optional): Nom de la source audio. Défaut à None (utilise AUDIO_SOURCE_NAME).
-            duration_ms (int, optional): Durée de l'enregistrement en millisecondes. Défaut à 500.
-        
-        Returns:
-            dict: Données audio simulées (fréquences et amplitudes)
-        """
-        # Note: OBS WebSocket ne fournit pas directement de données audio brutes
-        # Ceci est un exemple simulé. Dans une implémentation réelle, vous pourriez
-        # utiliser une autre méthode, comme capturer l'audio système directement.
-        if not self.connected:
-            self.logger.warning("Non connecté à OBS, impossible de récupérer l'audio")
-            return None
-        
-        if not source_name:
-            source_name = AUDIO_SOURCE_NAME
-        
-        # Simulation de données audio
-        audio_data = {
-            'frequencies': np.random.randint(20, 20000, 10),
-            'amplitudes': np.random.random(10),
-            'average_level': np.random.random() * 100,
-            'peak_level': np.random.random() * 100,
-            'speech_detected': np.random.random() > 0.5
-        }
-        
-        self.current_audio = audio_data
-        return audio_data
     
     def get_media_sources(self):
         """
@@ -515,15 +467,3 @@ class OBSCapture:
             return self.get_video_frame(self.current_source)
         else:
             return self.get_video_frame()
-    
-    def get_current_audio(self):
-        """
-        Récupère les données audio actuelles de la source sélectionnée
-        
-        Returns:
-            dict: Données audio ou None en cas d'erreur
-        """
-        if self.current_source:
-            return self.get_audio_data(self.current_source)
-        else:
-            return self.get_audio_data()
