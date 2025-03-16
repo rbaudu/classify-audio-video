@@ -12,6 +12,13 @@ La dernière mise à jour apporte une restructuration majeure du code pour amél
 - L'implémentation de tests unitaires
 - L'extension et l'évolution de l'application
 
+### Tests unitaires complets
+Une suite complète de tests unitaires a été ajoutée pour garantir la qualité et la robustesse du code :
+- Tests pour chaque module principal de l'application
+- Mocks et utilitaires pour faciliter les tests
+- Script d'exécution de tests flexible
+- Documentation détaillée sur l'utilisation des tests
+
 ### Capture Audio via PyAudio
 La mise à jour précédente a apporté une amélioration majeure : la capture audio est désormais réalisée directement via PyAudio au lieu d'OBS. Cette modification permet :
 - Une capture audio haute qualité directement depuis le microphone
@@ -44,6 +51,7 @@ De nouvelles API ont été ajoutées pour gérer les périphériques audio :
 - **API externe** : Envoi des résultats vers un service tiers via HTTP POST
 - **Analyse de fichiers vidéo** : Prise en charge des fichiers médias chargés dans OBS pour analyse complète ou image par image
 - **Exportation de données** : Export des analyses en formats JSON et CSV
+- **Tests unitaires** : Couverture de test complète pour tous les modules principaux
 
 ## Structure du projet
 
@@ -80,6 +88,16 @@ classify-audio-video/
 │   └── utils/                    # Utilitaires divers
 │       ├── __init__.py
 │       └── formatting.py         # Fonctions de formatage (temps, etc.)
+├── tests/                        # Tests unitaires
+│   ├── __init__.py               # Initialisation du paquet de tests
+│   ├── README.md                 # Documentation spécifique aux tests
+│   ├── helpers.py                # Classes mock et utilitaires pour les tests
+│   ├── runner.py                 # Script pour lancer les tests
+│   ├── test_api_routes.py        # Tests pour les routes API
+│   ├── test_formatting.py        # Tests pour les utilitaires de formatage
+│   ├── test_analysis_manager.py  # Tests pour le gestionnaire d'analyse
+│   ├── test_video_analysis.py    # Tests pour l'analyse vidéo
+│   └── test_web_routes.py        # Tests pour les routes web
 ├── web/                          # Interface web
 │   ├── templates/                # Gabarits HTML
 │   │   ├── index.html            # Page d'accueil
@@ -238,6 +256,77 @@ http://localhost:5000
      - CSV : Pour analyse dans des tableurs (Excel, Google Sheets)
      - JSON : Pour intégration dans d'autres applications
 
+## Tests unitaires
+
+Des tests unitaires complets sont disponibles pour valider le fonctionnement des différents modules de l'application.
+
+### Exécution des tests
+
+Plusieurs méthodes sont disponibles pour exécuter les tests :
+
+#### Utiliser le script runner.py
+
+Ce script offre une interface flexible pour lancer les tests :
+
+```bash
+# Afficher l'aide sur les options disponibles
+python tests/runner.py --help
+
+# Lister tous les tests disponibles
+python tests/runner.py --list
+
+# Exécuter tous les tests
+python tests/runner.py --all
+
+# Exécuter un test spécifique
+python tests/runner.py --test=formatting
+
+# Exécuter les tests pour un module spécifique
+python tests/runner.py --module=video_analysis
+```
+
+#### Utiliser unittest directement
+
+Vous pouvez également utiliser le module unittest de Python :
+
+```bash
+# Exécuter tous les tests
+python -m unittest discover tests
+
+# Exécuter un test spécifique
+python -m unittest tests.test_formatting
+
+# Exécuter une classe de test spécifique
+python -m unittest tests.test_api_routes.TestAPIRoutes
+
+# Exécuter une méthode de test spécifique
+python -m unittest tests.test_api_routes.TestAPIRoutes.test_get_current_activity
+```
+
+#### Exécuter un fichier de test directement
+
+```bash
+# Par exemple, pour les tests du module de formatage
+python tests/test_formatting.py
+```
+
+### Interprétation des résultats
+
+Après l'exécution des tests, vous verrez un rapport indiquant :
+- Le nombre de tests exécutés
+- Le temps d'exécution
+- Des points `.` pour les tests réussis, `F` pour les échecs, et `E` pour les erreurs
+- Des détails sur les échecs ou erreurs éventuels
+- Un résumé final (OK ou FAILED)
+
+### Documentation des tests
+
+Pour plus de détails sur les tests unitaires, consultez le fichier `tests/README.md` qui contient :
+- Une explication détaillée des classes mock disponibles
+- Des guides pour ajouter de nouveaux tests
+- Des exemples d'utilisation des différentes fonctionnalités de test
+- Des bonnes pratiques pour la création de tests
+
 ## Fonctionnement technique
 
 ### Architecture modulaire
@@ -352,6 +441,13 @@ La classe `ExternalServiceClient` envoie les résultats toutes les 5 minutes via
 - Si une analyse vidéo échoue, consultez les journaux d'OBS et de l'application
 - Pour les vidéos longues, augmentez l'intervalle d'échantillonnage pour réduire le temps d'analyse
 
+### Problèmes avec les tests unitaires
+
+- Si vous obtenez des erreurs d'importation, vérifiez que vous êtes dans le dossier racine du projet
+- Pour les tests qui utilisent des mocks, assurez-vous que les dépendances requises sont installées
+- Si un test échoue, consultez le message d'erreur pour identifier le problème
+- Pour déboguer un test spécifique, vous pouvez l'exécuter individuellement avec plus de verbosité
+
 ## Développement et extension
 
 Grâce à la nouvelle architecture modulaire, l'extension de l'application est simplifiée :
@@ -366,11 +462,13 @@ Grâce à la nouvelle architecture modulaire, l'extension de l'application est s
    - Pour ajuster les règles de classification, modifiez `activity_classifier.py`
 
 3. **Tests unitaires** :
-   - Chaque module peut désormais être testé indépendamment
-   - Créez un dossier `tests/` parallèle à `server/` pour organiser vos tests
+   - Pour ajouter de nouveaux tests, créez des fichiers dans le dossier `tests/`
+   - Utilisez les mocks existants ou créez-en de nouveaux selon vos besoins
+   - Suivez le pattern AAA (Arrange, Act, Assert) pour structurer vos tests
 
 4. **Développement collaboratif** :
    - Différents développeurs peuvent travailler sur différents modules sans interférence
+   - Utilisez les tests pour valider les modifications avant de les fusionner
 
 ## Contribution
 
