@@ -20,18 +20,18 @@ class ActivityClassifier:
     Utilise un modèle de deep learning pour identifier l'activité parmi les catégories prédéfinies.
     """
     
-    def __init__(self, obs_capture, stream_processor, db_manager, model_path=None):
+    def __init__(self, capture_manager, stream_processor, db_manager, model_path=None):
         """
         Initialise le classificateur d'activité.
         
         Args:
-            obs_capture: Instance de OBSCapture pour capturer les images et l'audio
+            capture_manager: Instance de SyncManager pour capturer les données audio/vidéo synchronisées
             stream_processor: Instance de StreamProcessor pour traiter les données
             db_manager: Instance de DBManager pour accéder à la base de données
             model_path (str, optional): Chemin vers le modèle de classification pré-entraîné.
                 Si None, utilise le chemin défini dans la configuration ou un modèle de règles prédéfinies simple.
         """
-        self.obs_capture = obs_capture
+        self.capture_manager = capture_manager
         self.stream_processor = stream_processor
         self.db_manager = db_manager
         
@@ -64,19 +64,20 @@ class ActivityClassifier:
             dict: Résultat de la classification ou None en cas d'erreur
         """
         try:
-            # Capturer une image
-            frame = self.obs_capture.get_current_frame()
+            # Récupérer les données synchronisées
+            sync_data = self.capture_manager.get_synchronized_data()
             
-            # Capturer l'audio
-            audio_data = self.obs_capture.get_current_audio()
-            
-            if frame is None or audio_data is None:
-                logger.warning("Impossible de capturer l'image ou l'audio")
+            if sync_data is None:
+                logger.warning("Impossible de récupérer les données synchronisées")
                 return None
             
-            # Traiter les données
-            video_features = self.stream_processor.process_video(frame)
-            audio_features = self.stream_processor.process_audio(audio_data)
+            # Utiliser les données vidéo et audio déjà traitées
+            video_features = sync_data['video']['processed']
+            audio_features = sync_data['audio']['processed']
+            
+            if video_features is None or audio_features is None:
+                logger.warning("Données vidéo ou audio traitées manquantes")
+                return None
             
             # Classifier l'activité
             result = self.classify_activity(video_features, audio_features)
