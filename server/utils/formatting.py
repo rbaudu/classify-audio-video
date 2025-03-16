@@ -11,8 +11,14 @@ def format_time(seconds):
         
     Returns:
         str: Temps formaté (HH:MM:SS ou MM:SS)
+        
+    Raises:
+        ValueError: Si seconds est négatif
     """
-    minutes, seconds = divmod(seconds, 60)
+    if seconds < 0:
+        raise ValueError("Le temps en secondes ne peut pas être négatif")
+    
+    minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     
     if hours > 0:
