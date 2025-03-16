@@ -3,6 +3,7 @@
 
 # Exporter les configurations essentielles pour une utilisation facile
 from server.config import Config
+import os
 
 # Configuration de base
 SECRET_KEY = Config.SECRET_KEY
@@ -19,6 +20,8 @@ OBS_PASSWORD = Config.OBS_PASSWORD
 BASE_DIR = Config.BASE_DIR
 DB_PATH = Config.DATABASE_PATH
 MODEL_PATH = Config.MODEL_PATH
+# Ajout du DATA_DIR manquant
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 
 # Configuration du service externe
 EXTERNAL_SERVICE_URL = Config.EXTERNAL_SERVICE_URL
