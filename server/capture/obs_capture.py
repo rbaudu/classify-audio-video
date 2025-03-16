@@ -52,6 +52,9 @@ class OBSCapture(OBSSourcesMixin, OBSEventsMixin, OBSMediaMixin):
         # Dernière image réussie (pour la récupération d'erreur)
         self.last_successful_frame = None
         
+        # Initialisation de l'état de capture (pour la gestion des erreurs répétées)
+        self._initialize_capture_state()
+        
         # Tentative de connexion initiale
         self.connect()
     
