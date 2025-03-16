@@ -1,9 +1,8 @@
 # Fichier d'initialisation du package server
 # Cela permet d'importer les modules du package server
 
-# Exporter les configurations essentielles pour une utilisation facile
+# Importer toutes les configurations depuis le fichier config.py
 from server.config import Config
-import os
 
 # Configuration de base
 SECRET_KEY = Config.SECRET_KEY
@@ -15,13 +14,19 @@ WEB_PORT = Config.FLASK_PORT
 OBS_HOST = Config.OBS_HOST
 OBS_PORT = Config.OBS_PORT
 OBS_PASSWORD = Config.OBS_PASSWORD
+VIDEO_SOURCE_NAME = Config.VIDEO_SOURCE_NAME
+AUDIO_SOURCE_NAME = Config.AUDIO_SOURCE_NAME
+
+# Configuration de reconnexion OBS WebSocket
+OBS_RECONNECT_INTERVAL = Config.OBS_RECONNECT_INTERVAL
+OBS_MAX_RECONNECT_INTERVAL = Config.OBS_MAX_RECONNECT_INTERVAL
+OBS_MAX_RECONNECT_ATTEMPTS = Config.OBS_MAX_RECONNECT_ATTEMPTS
 
 # Configuration des chemins
 BASE_DIR = Config.BASE_DIR
 DB_PATH = Config.DATABASE_PATH
 MODEL_PATH = Config.MODEL_PATH
-# Ajout du DATA_DIR manquant
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+DATA_DIR = Config.DATA_DIR
 
 # Configuration du service externe
 EXTERNAL_SERVICE_URL = Config.EXTERNAL_SERVICE_URL
@@ -47,26 +52,5 @@ AUDIO_VIDEO_SYNC_BUFFER_SIZE = Config.AUDIO_VIDEO_SYNC_BUFFER_SIZE
 ANALYSIS_INTERVAL = Config.ANALYSIS_INTERVAL
 
 # Variables pour l'interface
-ACTIVITY_ICONS = {
-    'endormi': 'moon',
-    'à table': 'utensils',
-    'lisant': 'book-open',
-    'au téléphone': 'phone',
-    'en conversation': 'users',
-    'occupé': 'briefcase',
-    'inactif': 'pause-circle'
-}
-
-ACTIVITY_COLORS = {
-    'endormi': 'indigo',
-    'à table': 'orange',
-    'lisant': 'teal',
-    'au téléphone': 'purple',
-    'en conversation': 'blue',
-    'occupé': 'red',
-    'inactif': 'gray'
-}
-
-# Variables pour la capture
-VIDEO_SOURCE_NAME = 'Default Video Source'
-AUDIO_SOURCE_NAME = 'Default Audio Source'
+ACTIVITY_ICONS = Config.ACTIVITY_ICONS
+ACTIVITY_COLORS = Config.ACTIVITY_COLORS
