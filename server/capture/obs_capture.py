@@ -7,6 +7,7 @@ import numpy as np
 import base64
 from io import BytesIO
 from PIL import Image
+import random
 
 # Import de la configuration
 from server import OBS_HOST, OBS_PORT, OBS_PASSWORD, VIDEO_SOURCE_NAME
@@ -26,7 +27,11 @@ class OBSCapture:
         self.current_frame = None
         self.reconnect_thread = None
         self.reconnect_interval = 5  # secondes
+        self.max_reconnect_interval = 60  # secondes (intervalle maximum en cas d'échecs répétés)
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 0  # 0 pour un nombre illimité de tentatives
         self.should_reconnect = True
+        self.connection_lost_time = None
         
         # État des média
         self.media_states = {}
@@ -62,10 +67,14 @@ class OBSCapture:
                 self.ws.register(self._on_media_pause, events.MediaPaused)
                 self.ws.register(self._on_media_stop, events.MediaStopped)
                 self.ws.register(self._on_media_end, events.MediaEnded)
+                self.ws.register(self._on_exit_started, events.ExitStarted)
+                self.ws.register(self._on_connection_closed, events.ConnectionClosed)
                 
                 # Se connecter à OBS
                 self.ws.connect()
                 self.connected = True
+                self.reconnect_attempts = 0
+                self.connection_lost_time = None
                 self.logger.info("Connecté à OBS avec succès")
                 
                 # Récupérer les sources disponibles
@@ -75,6 +84,10 @@ class OBSCapture:
             except Exception as e:
                 self.logger.error(f"Erreur lors de la connexion à OBS: {str(e)}")
                 self.connected = False
+                
+                # Enregistrer le moment où la connexion a été perdue
+                if self.connection_lost_time is None:
+                    self.connection_lost_time = time.time()
                 
                 # Lancer un thread pour tenter la reconnexion automatique
                 if not self.reconnect_thread or not self.reconnect_thread.is_alive():
@@ -98,15 +111,42 @@ class OBSCapture:
                     self.logger.error(f"Erreur lors de la déconnexion d'OBS: {str(e)}")
                 finally:
                     self.connected = False
+                    self.reconnect_attempts = 0
+                    self.connection_lost_time = None
     
     def _reconnect_loop(self):
         """
         Boucle pour tenter de se reconnecter à OBS à intervalles réguliers
         """
-        while self.should_reconnect and not self.connected:
-            self.logger.info(f"Tentative de reconnexion à OBS dans {self.reconnect_interval} secondes...")
-            time.sleep(self.reconnect_interval)
-            self.connect()
+        while self.should_reconnect and (self.max_reconnect_attempts == 0 or self.reconnect_attempts < self.max_reconnect_attempts):
+            # Incrémenter le compteur de tentatives
+            self.reconnect_attempts += 1
+            
+            # Calculer l'intervalle de reconnexion avec un backoff exponentiel
+            if self.reconnect_attempts > 1:
+                # Augmenter l'intervalle de reconnexion avec un peu d'aléatoire pour éviter les tempêtes de reconnexion
+                jitter = random.uniform(0.8, 1.2)
+                current_interval = min(
+                    self.reconnect_interval * (1.5 ** (self.reconnect_attempts - 1)) * jitter,
+                    self.max_reconnect_interval
+                )
+            else:
+                current_interval = self.reconnect_interval
+            
+            self.logger.info(f"Tentative de reconnexion {self.reconnect_attempts} à OBS dans {current_interval:.1f} secondes...")
+            
+            # Attendre l'intervalle calculé
+            time.sleep(current_interval)
+            
+            # Tentative de reconnexion
+            if self.connect():
+                self.logger.info(f"Reconnexion réussie après {self.reconnect_attempts} tentatives")
+                # Durée totale de l'interruption
+                if self.connection_lost_time:
+                    downtime = time.time() - self.connection_lost_time
+                    self.logger.info(f"Durée totale de l'interruption: {downtime:.1f} secondes")
+                    self.connection_lost_time = None
+                break  # Sortir de la boucle si reconnecté avec succès
     
     def _refresh_sources(self):
         """
@@ -132,13 +172,9 @@ class OBSCapture:
             except Exception as e:
                 self.logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
                 # Vérifier si l'erreur est liée à la connexion
-                if "socket is already closed" in str(e):
-                    self.logger.warning("Socket fermé. Tentative de reconnecter...")
-                    self.connected = False
-                    if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-                        self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-                        self.reconnect_thread.daemon = True
-                        self.reconnect_thread.start()
+                if self._is_connection_error(str(e)):
+                    self.logger.warning("Connexion perdue. Tentative de reconnecter...")
+                    self._handle_connection_lost()
                     return
                     
                 # Alternative: tenter d'utiliser GetInputList pour les versions récentes d'OBS
@@ -170,6 +206,11 @@ class OBSCapture:
                     self.logger.info(f"Sources média trouvées (via GetInputList): {[s['name'] for s in self.media_sources]}")
                 except Exception as e2:
                     self.logger.error(f"Échec également avec GetInputList: {str(e2)}")
+                    # Vérifier si l'erreur est liée à la connexion
+                    if self._is_connection_error(str(e2)):
+                        self.logger.warning("Connexion perdue. Tentative de reconnecter...")
+                        self._handle_connection_lost()
+                        return
                     # Par défaut, créer au moins une source virtuelle pour pouvoir continuer
                     self.video_sources = [{'name': 'Default Video Source', 'typeId': 'unknown'}]
                     self.media_sources = []
@@ -191,15 +232,77 @@ class OBSCapture:
                 return True
             except Exception as e:
                 self.logger.warning(f"La connexion à OBS semble interrompue: {str(e)}")
-                self.connected = False
-                
-                # Lancer la reconnexion si nécessaire
-                if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-                    self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-                    self.reconnect_thread.daemon = True
-                    self.reconnect_thread.start()
-                    
+                self._handle_connection_lost()
                 return False
+    
+    def _is_connection_error(self, error_message):
+        """
+        Détecte si une erreur est liée à une perte de connexion
+        
+        Args:
+            error_message (str): Message d'erreur à analyser
+        
+        Returns:
+            bool: True si c'est une erreur de connexion, False sinon
+        """
+        connection_error_patterns = [
+            "socket is already closed",
+            "not connected",
+            "connection refused",
+            "connection reset",
+            "timed out",
+            "network is unreachable",
+            "connection was closed",
+            "disconnected",
+            "connection error",
+            "failed to connect"
+        ]
+        
+        for pattern in connection_error_patterns:
+            if pattern.lower() in error_message.lower():
+                return True
+        
+        return False
+    
+    def _handle_connection_lost(self):
+        """
+        Gère la perte de connexion et initialise la procédure de reconnexion
+        """
+        # Ne pas réinitialiser si déjà déconnecté
+        if not self.connected:
+            return
+            
+        self.connected = False
+        
+        # Enregistrer le moment où la connexion a été perdue
+        if self.connection_lost_time is None:
+            self.connection_lost_time = time.time()
+        
+        # Lancer la reconnexion si nécessaire
+        if self.should_reconnect and (not self.reconnect_thread or not self.reconnect_thread.is_alive()):
+            self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
+            self.reconnect_thread.daemon = True
+            self.reconnect_thread.start()
+    
+    def _on_connection_closed(self, event):
+        """
+        Callback pour l'événement de fermeture de connexion
+        """
+        self.logger.warning("Événement de fermeture de connexion reçu")
+        self._handle_connection_lost()
+    
+    def _on_exit_started(self, event):
+        """
+        Callback pour l'événement de fermeture d'OBS
+        """
+        self.logger.warning("Événement de fermeture d'OBS reçu")
+        with self.ws_lock:
+            self.connected = False
+            self.should_reconnect = True  # On veut se reconnecter quand OBS redémarre
+            
+            # Enregistrer le moment où la connexion a été perdue
+            if self.connection_lost_time is None:
+                self.connection_lost_time = time.time()
     
     def _is_video_source(self, type_id):
         """
@@ -333,14 +436,10 @@ class OBSCapture:
             except Exception as e:
                 self.logger.error(f"Erreur lors de la capture d'image: {str(e)}")
                 
-                # Si l'erreur indique que le socket est fermé, tenter de se reconnecter
-                if "socket is already closed" in str(e):
-                    self.logger.warning("Socket fermé. Tentative de reconnecter...")
-                    self.connected = False
-                    if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-                        self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-                        self.reconnect_thread.daemon = True
-                        self.reconnect_thread.start()
+                # Si l'erreur indique une perte de connexion, tenter de se reconnecter
+                if self._is_connection_error(str(e)):
+                    self.logger.warning("Connexion perdue lors de la capture d'image. Tentative de reconnecter...")
+                    self._handle_connection_lost()
                     
                     # Retourner la dernière frame réussie si disponible
                     if self.last_successful_frame is not None:
@@ -368,6 +467,11 @@ class OBSCapture:
                 return self.media_sources
             except Exception as e:
                 self.logger.error(f"Erreur lors de la récupération des sources média: {str(e)}")
+                
+                # Vérifier si l'erreur est liée à la connexion
+                if self._is_connection_error(str(e)):
+                    self._handle_connection_lost()
+                
                 return []
     
     def select_media_source(self, source_name):
@@ -416,6 +520,11 @@ class OBSCapture:
                 return True
             except Exception as e:
                 self.logger.error(f"Erreur lors de la sélection de la source média: {str(e)}")
+                
+                # Vérifier si l'erreur est liée à la connexion
+                if self._is_connection_error(str(e)):
+                    self._handle_connection_lost()
+                
                 return False
     
     def get_media_properties(self, source_name):
@@ -467,6 +576,11 @@ class OBSCapture:
                 return properties
             except Exception as e:
                 self.logger.error(f"Erreur lors de la récupération des propriétés média: {str(e)}")
+                
+                # Vérifier si l'erreur est liée à la connexion
+                if self._is_connection_error(str(e)):
+                    self._handle_connection_lost()
+                
                 return None
     
     def control_media(self, source_name, action, position=None):
@@ -519,14 +633,9 @@ class OBSCapture:
             except Exception as e:
                 self.logger.error(f"Erreur lors du contrôle du média: {str(e)}")
                 
-                # Vérifier si la connexion est perdue
-                if "socket is already closed" in str(e):
-                    self.connected = False
-                    self.logger.warning("Socket fermé. Tentative de reconnecter...")
-                    if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-                        self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-                        self.reconnect_thread.daemon = True
-                        self.reconnect_thread.start()
+                # Vérifier si l'erreur est liée à la connexion
+                if self._is_connection_error(str(e)):
+                    self._handle_connection_lost()
                 
                 return False
     
@@ -578,14 +687,9 @@ class OBSCapture:
             except Exception as e:
                 self.logger.error(f"Erreur lors de la récupération du temps média: {str(e)}")
                 
-                # Vérifier si la connexion est perdue
-                if "socket is already closed" in str(e):
-                    self.connected = False
-                    self.logger.warning("Socket fermé. Tentative de reconnecter...")
-                    if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-                        self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-                        self.reconnect_thread.daemon = True
-                        self.reconnect_thread.start()
+                # Vérifier si l'erreur est liée à la connexion
+                if self._is_connection_error(str(e)):
+                    self._handle_connection_lost()
                 
                 # Si l'état est déjà enregistré, retourner les dernières valeurs connues
                 if source_name in self.media_states:
