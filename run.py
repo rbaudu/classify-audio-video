@@ -12,13 +12,14 @@ sys.path.append(project_path)
 print(f"Chemin du projet ajouté: {project_path}")
 print(f"sys.path contient maintenant: {sys.path}")
 
-# Importation et exécution de l'application Flask
-from server.main import app
+# Importation et exécution de l'application Flask avec la fonction start_server
+from server.main import start_server
 
 if __name__ == "__main__":
     print("Démarrage du serveur classify-audio-video...")
     print("Accédez à l'interface via http://localhost:5000")
     print("Appuyez sur Ctrl+C pour arrêter le serveur")
     
-    # Lancement du serveur Flask en mode debug
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Appel de la fonction start_server au lieu de lancer directement app.run
+    # Cela permet de démarrer le gestionnaire de synchronisation audio/vidéo
+    start_server()
