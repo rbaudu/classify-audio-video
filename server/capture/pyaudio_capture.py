@@ -66,6 +66,34 @@ class PyAudioCapture:
             self.logger.error(f"Erreur lors de l'initialisation de PyAudio: {str(e)}")
             return False
     
+    def check_device(self):
+        """
+        Vérifie si au moins un périphérique audio d'entrée est disponible
+        
+        Returns:
+            bool: True si au moins un périphérique est disponible, False sinon
+        """
+        try:
+            if not self.p:
+                if not self.initialize():
+                    return False
+            
+            # Vérifier si au moins un périphérique d'entrée est disponible
+            devices = self.get_devices()
+            if not devices:
+                self.logger.warning("Aucun périphérique audio d'entrée disponible")
+                return False
+            
+            # Si la capture est en cours, vérifier si le stream est actif
+            if self.is_recording and self.stream:
+                return self.stream.is_active()
+            
+            # Sinon, simplement confirmer qu'il y a des périphériques disponibles
+            return True
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la vérification du périphérique audio: {str(e)}")
+            return False
+    
     def start_capture(self, device_index=None):
         """
         Démarre la capture audio en continu
