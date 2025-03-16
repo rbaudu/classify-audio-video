@@ -1,292 +1,306 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import logging
+import pyaudio
 import numpy as np
 import threading
 import time
+import logging
 import queue
-import pyaudio
-from scipy import signal
+from array import array
+from datetime import datetime
 
-# Import de la configuration
-from server import AUDIO_SAMPLE_RATE, AUDIO_CHANNELS
+from server import AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_FORMAT, AUDIO_CHUNK_SIZE
 
 logger = logging.getLogger(__name__)
 
 class AudioCapture:
     """
-    Classe pour capturer l'audio directement depuis le microphone en utilisant PyAudio.
-    Fonctionne en parallèle de la capture vidéo OBS.
+    Classe pour capturer l'audio du microphone en utilisant PyAudio.
+    Fonctionne en parallèle avec la capture vidéo d'OBS.
     """
     
-    def __init__(self, sample_rate=None, channels=None, chunk_size=1024, format=pyaudio.paInt16):
+    def __init__(self, sample_rate=None, channels=None, audio_format=None, chunk_size=None):
         """
-        Initialise le captureur audio.
+        Initialise le système de capture audio.
         
         Args:
-            sample_rate (int, optional): Taux d'échantillonnage en Hz.
-                Si None, utilise la valeur depuis la configuration.
-            channels (int, optional): Nombre de canaux audio (1=mono, 2=stéréo).
-                Si None, utilise la valeur depuis la configuration.
-            chunk_size (int, optional): Taille du buffer pour la capture audio.
-            format (int, optional): Format du son (pyaudio.paInt16, etc.).
+            sample_rate (int, optional): Taux d'échantillonnage audio en Hz. Default à AUDIO_SAMPLE_RATE de la config.
+            channels (int, optional): Nombre de canaux audio (1=mono, 2=stéréo). Default à AUDIO_CHANNELS de la config.
+            audio_format (int, optional): Format de l'échantillon audio. Default à AUDIO_FORMAT de la config.
+            chunk_size (int, optional): Taille des chunks audio. Default à AUDIO_CHUNK_SIZE de la config.
         """
         self.sample_rate = sample_rate or AUDIO_SAMPLE_RATE
         self.channels = channels or AUDIO_CHANNELS
-        self.chunk_size = chunk_size
-        self.format = format
+        self.audio_format = audio_format or AUDIO_FORMAT
+        self.chunk_size = chunk_size or AUDIO_CHUNK_SIZE
         
-        self.pyaudio = None
-        self.stream = None
+        self.py_audio = None
+        self.audio_stream = None
         self.is_recording = False
         self.recording_thread = None
         
-        # Buffer circulaire pour stocker les dernières secondes d'audio
-        self.audio_buffer = queue.Queue(maxsize=50)  # ~5 secondes d'audio à 44.1kHz
+        # Buffer circulaire pour stocker les données audio récentes
+        self.buffer_duration = 2  # Durée en secondes
+        self.buffer_size = int(self.buffer_duration * self.sample_rate)
+        self.audio_buffer = np.zeros(self.buffer_size, dtype=np.float32)
+        self.buffer_position = 0
         
-        # Horodatage pour la synchronisation avec la vidéo
-        self.last_capture_time = 0
+        # File d'attente thread-safe pour transférer les données audio du thread d'enregistrement
+        self.audio_queue = queue.Queue()
         
-        # Initialisation de PyAudio
-        try:
-            self.pyaudio = pyaudio.PyAudio()
-            logger.info("PyAudio initialisé avec succès")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'initialisation de PyAudio: {str(e)}")
+        # Timestamp du dernier échantillon pour la synchronisation
+        self.last_sample_time = 0
+        
+        logger.info(f"AudioCapture initialisé avec: sample_rate={self.sample_rate}, channels={self.channels}, "
+                   f"format={self.audio_format}, chunk_size={self.chunk_size}")
     
-    def start_recording(self):
+    def start(self):
         """
-        Démarre l'enregistrement audio en continu dans un thread séparé.
+        Démarre la capture audio en continu.
         """
         if self.is_recording:
-            logger.warning("L'enregistrement est déjà en cours")
-            return False
+            logger.warning("La capture audio est déjà en cours")
+            return
         
         try:
+            self.py_audio = pyaudio.PyAudio()
+            
             # Ouvrir le flux audio
-            self.stream = self.pyaudio.open(
-                format=self.format,
+            self.audio_stream = self.py_audio.open(
+                format=self.audio_format,
                 channels=self.channels,
                 rate=self.sample_rate,
                 input=True,
-                frames_per_buffer=self.chunk_size
+                frames_per_buffer=self.chunk_size,
+                stream_callback=self._audio_callback
             )
             
-            # Démarrer l'enregistrement dans un thread séparé
             self.is_recording = True
-            self.recording_thread = threading.Thread(target=self._record_loop)
-            self.recording_thread.daemon = True
-            self.recording_thread.start()
             
-            logger.info(f"Enregistrement audio démarré (sample_rate={self.sample_rate}, channels={self.channels})")
+            logger.info("Capture audio démarrée avec succès")
             return True
+            
         except Exception as e:
-            logger.error(f"Erreur lors du démarrage de l'enregistrement: {str(e)}")
+            logger.error(f"Erreur lors du démarrage de la capture audio: {str(e)}")
+            self.stop()
             return False
     
-    def stop_recording(self):
+    def _audio_callback(self, in_data, frame_count, time_info, status):
         """
-        Arrête l'enregistrement audio.
+        Callback appelé par PyAudio pour chaque chunk audio capturé.
+        
+        Args:
+            in_data (bytes): Données audio brutes
+            frame_count (int): Nombre de frames dans ce chunk
+            time_info (dict): Informations de timing fournies par PortAudio
+            status (int): Statut de PortAudio
+            
+        Returns:
+            tuple: (None, flag) indiquant à PyAudio de continuer
         """
-        if not self.is_recording:
-            logger.warning("Aucun enregistrement en cours")
-            return
+        if status:
+            logger.warning(f"Statut PyAudio non nul: {status}")
         
-        # Signaler l'arrêt de l'enregistrement
-        self.is_recording = False
+        try:
+            # Convertir les bytes en array numpy
+            audio_data = np.frombuffer(in_data, dtype=np.int16)
+            
+            # Normaliser les données (-1.0 à 1.0)
+            audio_data = audio_data.astype(np.float32) / 32768.0
+            
+            # Si stéréo, convertir en mono en moyennant les canaux
+            if self.channels == 2:
+                audio_data = audio_data.reshape(-1, 2).mean(axis=1)
+            
+            # Mettre à jour le timestamp du dernier échantillon
+            self.last_sample_time = time.time()
+            
+            # Mettre à jour le buffer circulaire
+            end_pos = self.buffer_position + len(audio_data)
+            
+            if end_pos <= self.buffer_size:
+                # Cas simple: tout rentre dans le buffer sans enroulement
+                self.audio_buffer[self.buffer_position:end_pos] = audio_data
+            else:
+                # Cas d'enroulement: on remplit la fin du buffer puis on revient au début
+                first_part = self.buffer_size - self.buffer_position
+                self.audio_buffer[self.buffer_position:] = audio_data[:first_part]
+                self.audio_buffer[:end_pos - self.buffer_size] = audio_data[first_part:]
+            
+            # Mettre à jour la position du buffer
+            self.buffer_position = end_pos % self.buffer_size
+            
+            # Ajouter à la file d'attente avec timestamp pour synchronisation éventuelle
+            self.audio_queue.put({
+                'data': audio_data.copy(),
+                'timestamp': self.last_sample_time
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur dans le callback audio: {str(e)}")
         
-        # Attendre la fin du thread d'enregistrement
-        if self.recording_thread and self.recording_thread.is_alive():
-            self.recording_thread.join(timeout=2.0)
-        
-        # Fermer le flux audio
-        if self.stream:
-            try:
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = None
-            except Exception as e:
-                logger.error(f"Erreur lors de la fermeture du flux audio: {str(e)}")
-        
-        logger.info("Enregistrement audio arrêté")
-    
-    def _record_loop(self):
-        """
-        Boucle d'enregistrement exécutée dans un thread séparé.
-        Capture continuellement l'audio et le stocke dans le buffer.
-        """
-        while self.is_recording and self.stream:
-            try:
-                # Lire un chunk d'audio
-                audio_data = self.stream.read(self.chunk_size, exception_on_overflow=False)
-                
-                # Convertir les données binaires en tableau numpy
-                audio_array = np.frombuffer(audio_data, dtype=np.int16)
-                
-                # Mettre à jour l'horodatage
-                self.last_capture_time = time.time()
-                
-                # Ajouter au buffer (supprimer le plus ancien si plein)
-                if self.audio_buffer.full():
-                    try:
-                        self.audio_buffer.get_nowait()
-                    except queue.Empty:
-                        pass
-                
-                self.audio_buffer.put(audio_array)
-                
-            except Exception as e:
-                logger.error(f"Erreur dans la boucle d'enregistrement: {str(e)}")
-                time.sleep(0.1)  # Pause pour éviter une boucle d'erreur trop rapide
+        # Continuer l'enregistrement
+        return (None, pyaudio.paContinue)
     
     def get_audio_data(self, duration_ms=500):
         """
-        Récupère les dernières données audio enregistrées.
+        Récupère un segment audio de la durée spécifiée depuis le buffer.
         
         Args:
-            duration_ms (int, optional): Durée des données audio à récupérer en millisecondes.
-                Défaut à 500ms.
-        
+            duration_ms (int): Durée du segment audio en millisecondes
+            
         Returns:
-            dict: Données audio traitées avec caractéristiques extraites.
+            dict: Données audio contenant l'échantillon brut et le timestamp
         """
-        if not self.is_recording or self.audio_buffer.empty():
-            logger.warning("Aucune donnée audio disponible")
+        if not self.is_recording:
+            logger.warning("Tentative de récupération audio alors que l'enregistrement n'est pas actif")
             return None
         
         try:
-            # Calculer le nombre de chunks nécessaires pour la durée demandée
-            chunks_needed = int((duration_ms / 1000.0) * self.sample_rate / self.chunk_size)
-            chunks_needed = max(1, min(chunks_needed, self.audio_buffer.qsize()))
+            # Calculer le nombre d'échantillons correspondant à la durée demandée
+            num_samples = int((duration_ms / 1000.0) * self.sample_rate)
             
-            # Récupérer les derniers chunks d'audio (sans les supprimer du buffer)
-            audio_chunks = []
-            queue_list = list(self.audio_buffer.queue)
-            for i in range(max(0, len(queue_list) - chunks_needed), len(queue_list)):
-                audio_chunks.append(queue_list[i])
-            
-            # Concaténer les chunks
-            if audio_chunks:
-                audio_array = np.concatenate(audio_chunks)
+            # Extraire les données du buffer circulaire
+            if self.buffer_position >= num_samples:
+                # Cas simple: les données sont contiguës
+                audio_segment = self.audio_buffer[self.buffer_position - num_samples:self.buffer_position]
             else:
-                logger.warning("Pas assez de chunks audio disponibles")
-                return None
+                # Cas d'enroulement: combiner la fin et le début du buffer
+                part1 = self.audio_buffer[self.buffer_size - (num_samples - self.buffer_position):]
+                part2 = self.audio_buffer[:self.buffer_position]
+                audio_segment = np.concatenate((part1, part2))
             
-            # Normaliser les données (-1.0 à 1.0)
-            audio_normalized = audio_array.astype(np.float32) / 32768.0  # Pour Int16
-            
-            # Extraire des caractéristiques audio
-            features = self._extract_audio_features(audio_normalized)
-            
-            # Résultat sous forme de dictionnaire
-            result = {
-                'timestamp': self.last_capture_time,
-                'duration_ms': duration_ms,
-                'raw_audio': audio_normalized,
+            # Retourner les données avec timestamp
+            return {
+                'raw_audio': audio_segment,
+                'timestamp': self.last_sample_time,
                 'sample_rate': self.sample_rate,
-                'channels': self.channels,
-                'features': features
+                'channels': 1,  # Toujours mono après traitement
+                'duration_ms': duration_ms
             }
-            
-            return result
             
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des données audio: {str(e)}")
             return None
     
-    def _extract_audio_features(self, audio_normalized):
+    def analyze_audio(self, audio_data=None, duration_ms=500):
         """
-        Extrait des caractéristiques pertinentes du signal audio.
+        Analyse les données audio pour extraire des caractéristiques utiles.
+        Utilise les données fournies ou récupère les données récentes si non spécifiées.
         
         Args:
-            audio_normalized (numpy.ndarray): Signal audio normalisé.
-        
+            audio_data (dict, optional): Données audio à analyser. 
+                                         Si None, récupère automatiquement les données récentes.
+            duration_ms (int): Durée du segment audio à analyser en millisecondes
+            
         Returns:
-            dict: Caractéristiques extraites du signal audio.
+            dict: Caractéristiques audio extraites
         """
-        features = {}
+        # Obtenir les données audio si non fournies
+        if audio_data is None:
+            audio_data = self.get_audio_data(duration_ms)
+            
+        if audio_data is None:
+            return None
         
         try:
-            # 1. Niveau sonore (RMS)
-            rms = np.sqrt(np.mean(audio_normalized**2))
-            features['rms_level'] = float(rms)
+            # Extraire le signal audio brut
+            audio_signal = audio_data.get('raw_audio')
             
-            # 2. Zero-Crossing Rate (taux de passage par zéro)
-            zcr = np.sum(np.abs(np.diff(np.signbit(audio_normalized)))) / (2 * len(audio_normalized))
-            features['zero_crossing_rate'] = float(zcr)
+            if audio_signal is None or len(audio_signal) == 0:
+                return None
             
-            # 3. Analyse fréquentielle (FFT)
-            if len(audio_normalized) > 0:
-                # Transformée de Fourier rapide (FFT)
-                fft_result = np.abs(np.fft.rfft(audio_normalized))
+            # Calculer le niveau RMS (Root Mean Square)
+            rms_level = np.sqrt(np.mean(audio_signal**2))
+            
+            # Détection basique de parole par le taux de passage par zéro
+            # Un taux élevé indique souvent la présence de parole
+            zero_crossings = np.sum(np.abs(np.diff(np.signbit(audio_signal)))) / (2 * len(audio_signal))
+            
+            # Analyse spectrale simple
+            if len(audio_signal) > 1:
+                # Transformée de Fourier rapide
+                spectrum = np.abs(np.fft.rfft(audio_signal))
+                freqs = np.fft.rfftfreq(len(audio_signal), 1/self.sample_rate)
                 
-                # Fréquences correspondantes
-                freqs = np.fft.rfftfreq(len(audio_normalized), 1/self.sample_rate)
-                
-                # Trouver la fréquence dominante
-                if len(fft_result) > 0:
-                    dominant_freq_idx = np.argmax(fft_result)
-                    dominant_freq = freqs[dominant_freq_idx]
-                    features['dominant_frequency'] = float(dominant_freq)
+                # Fréquence dominante
+                if len(spectrum) > 0:
+                    dominant_freq_idx = np.argmax(spectrum)
+                    dominant_frequency = freqs[dominant_freq_idx]
                     
-                    # Distribution de puissance dans différentes bandes de fréquence
-                    # Basse fréquence (< 300 Hz)
-                    low_freq_mask = freqs < 300
-                    low_freq_power = np.sum(fft_result[low_freq_mask])
+                    # Division du spectre en bandes
+                    # Basse (<300Hz), Moyenne (300-3000Hz), Haute (>3000Hz)
+                    low_mask = freqs < 300
+                    mid_mask = (freqs >= 300) & (freqs <= 3000)
+                    high_mask = freqs > 3000
                     
-                    # Fréquences moyennes (300-3000 Hz, typiques pour la voix)
-                    mid_freq_mask = (freqs >= 300) & (freqs <= 3000)
-                    mid_freq_power = np.sum(fft_result[mid_freq_mask])
+                    # Somme des puissances dans chaque bande
+                    low_power = np.sum(spectrum[low_mask])
+                    mid_power = np.sum(spectrum[mid_mask])
+                    high_power = np.sum(spectrum[high_mask])
                     
-                    # Hautes fréquences (> 3000 Hz)
-                    high_freq_mask = freqs > 3000
-                    high_freq_power = np.sum(fft_result[high_freq_mask])
+                    # Puissance totale
+                    total_power = low_power + mid_power + high_power
                     
-                    # Normalisation des puissances
-                    total_power = low_freq_power + mid_freq_power + high_freq_power
+                    # Ratios (protection contre la division par zéro)
                     if total_power > 0:
-                        features['low_freq_ratio'] = float(low_freq_power / total_power)
-                        features['mid_freq_ratio'] = float(mid_freq_power / total_power)
-                        features['high_freq_ratio'] = float(high_freq_power / total_power)
+                        low_ratio = low_power / total_power
+                        mid_ratio = mid_power / total_power
+                        high_ratio = high_power / total_power
+                    else:
+                        low_ratio = mid_ratio = high_ratio = 0
+                    
+                else:
+                    dominant_frequency = 0
+                    low_ratio = mid_ratio = high_ratio = 0
+            else:
+                dominant_frequency = 0
+                low_ratio = mid_ratio = high_ratio = 0
             
-            # 4. Détection de parole simplifiée
-            # La parole se caractérise généralement par :
-            # - Un ZCR relativement élevé
-            # - Une prédominance des fréquences moyennes (300-3000 Hz)
-            # - Des variations d'amplitude importantes
+            # Détection heuristique de parole
+            # La parole humaine est généralement entre 300-3000Hz avec taux de passage par zéro élevé
+            speech_detected = (mid_ratio > 0.3) and (zero_crossings > 0.05)
             
-            speech_confidence = 0.0
+            # Résultat
+            return {
+                'rms_level': float(rms_level),
+                'zero_crossing_rate': float(zero_crossings),
+                'dominant_frequency': float(dominant_frequency),
+                'low_freq_ratio': float(low_ratio),
+                'mid_freq_ratio': float(mid_ratio),
+                'high_freq_ratio': float(high_ratio),
+                'speech_detected': bool(speech_detected),
+                'timestamp': audio_data.get('timestamp', time.time())
+            }
             
-            # Si le ZCR est dans la plage typique pour la parole
-            if 0.01 < zcr < 0.1:
-                speech_confidence += 0.3
-            
-            # Si les fréquences moyennes sont dominantes (typique de la voix)
-            if features.get('mid_freq_ratio', 0) > 0.4:
-                speech_confidence += 0.4
-            
-            # Si le niveau sonore est suffisant
-            if rms > 0.05:
-                speech_confidence += 0.3
-            
-            features['speech_detected'] = speech_confidence > 0.5
-            features['speech_confidence'] = float(speech_confidence)
-            
-            return features
-        
         except Exception as e:
-            logger.error(f"Erreur lors de l'extraction des caractéristiques audio: {str(e)}")
-            return features
+            logger.error(f"Erreur lors de l'analyse audio: {str(e)}")
+            return None
     
-    def __del__(self):
+    def stop(self):
         """
-        Nettoyage lors de la destruction de l'objet.
+        Arrête la capture audio et libère les ressources.
         """
-        self.stop_recording()
+        self.is_recording = False
         
-        if self.pyaudio:
+        # Fermer le flux audio
+        if self.audio_stream:
             try:
-                self.pyaudio.terminate()
+                self.audio_stream.stop_stream()
+                self.audio_stream.close()
+            except Exception as e:
+                logger.error(f"Erreur lors de la fermeture du flux audio: {str(e)}")
+            finally:
+                self.audio_stream = None
+        
+        # Fermer PyAudio
+        if self.py_audio:
+            try:
+                self.py_audio.terminate()
             except Exception as e:
                 logger.error(f"Erreur lors de la terminaison de PyAudio: {str(e)}")
+            finally:
+                self.py_audio = None
+        
+        logger.info("Capture audio arrêtée")
