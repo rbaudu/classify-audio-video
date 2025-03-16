@@ -6,174 +6,293 @@ import time
 import threading
 import numpy as np
 from collections import deque
+import os
+import cv2
+import wave
 
-logger = logging.getLogger(__name__)
+# Import des modules de capture
+from server.capture.obs_capture import OBSCapture
+from server.capture.pyaudio_capture import PyAudioCapture
+from server.capture.stream_processor import StreamProcessor
+
+# Import de la configuration
+from server import (
+    AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_FORMAT, AUDIO_CHUNK_SIZE,
+    AUDIO_VIDEO_SYNC_BUFFER_SIZE, VIDEO_SOURCE_NAME, BASE_DIR
+)
 
 class SyncManager:
     """
-    Gestionnaire de synchronisation entre audio et vidéo.
-    Permet de maintenir une cohérence temporelle entre les flux audio et vidéo
-    pour l'analyse et la classification.
+    Gestionnaire de synchronisation entre la capture audio (PyAudio) et vidéo (OBS).
+    S'occupe de capturer les deux flux, de les synchroniser et de les traiter.
     """
     
-    def __init__(self, buffer_size=5):
-        """
-        Initialise le gestionnaire de synchronisation.
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
         
-        Args:
-            buffer_size (int): Taille du buffer en secondes
-        """
-        self.buffer_size = buffer_size
-        self.lock = threading.RLock()
+        # Instancier les objets de capture
+        self.obs_capture = OBSCapture()
+        self.audio_capture = PyAudioCapture()
+        self.processor = StreamProcessor()
         
-        # Buffers pour les données vidéo et audio
-        self.video_buffer = deque(maxlen=100)  # Stocke les timestamps et frames vidéo
-        self.audio_buffer = deque(maxlen=100)  # Stocke les timestamps et données audio
+        # Variables d'état
+        self.is_running = False
+        self.capture_thread = None
         
-        # Données les plus récentes (pour accès rapide)
-        self.latest_video = None
-        self.latest_audio = None
+        # Buffer pour les frames vidéo avec horodatage
+        self.video_buffer = deque(maxlen=30)  # 30 frames ~ 1 sec à 30 FPS
         
-        # Données synchronisées actuelles
-        self.current_sync_data = None
+        # Répertoire temporaire pour les captures
+        self.temp_dir = os.path.join(BASE_DIR, '..', 'data', 'temp_captures')
+        os.makedirs(self.temp_dir, exist_ok=True)
         
-        logger.info(f"SyncManager initialisé avec buffer_size={buffer_size}s")
+        self.logger.info("Gestionnaire de synchronisation initialisé")
     
-    def add_video_frame(self, frame_data):
+    def start(self):
         """
-        Ajoute une frame vidéo au buffer.
-        
-        Args:
-            frame_data (dict): Données de la frame vidéo
-                Doit contenir au moins 'timestamp' et 'frame'
-        """
-        if not frame_data or 'timestamp' not in frame_data:
-            return
-        
-        with self.lock:
-            # Ajouter au buffer
-            self.video_buffer.append(frame_data)
-            
-            # Mettre à jour la frame la plus récente
-            self.latest_video = frame_data
-            
-            # Essayer de synchroniser
-            self._try_sync()
-    
-    def add_audio_data(self, audio_data):
-        """
-        Ajoute des données audio au buffer.
-        
-        Args:
-            audio_data (dict): Données audio
-                Doit contenir au moins 'timestamp'
-        """
-        if not audio_data or 'timestamp' not in audio_data:
-            return
-        
-        with self.lock:
-            # Ajouter au buffer
-            self.audio_buffer.append(audio_data)
-            
-            # Mettre à jour les données audio les plus récentes
-            self.latest_audio = audio_data
-            
-            # Essayer de synchroniser
-            self._try_sync()
-    
-    def _try_sync(self):
-        """
-        Essaie de synchroniser les dernières données audio et vidéo.
-        """
-        if not self.video_buffer or not self.audio_buffer:
-            return
-        
-        # Trouver la paire la plus proche en temps
-        best_video = None
-        best_audio = None
-        min_diff = float('inf')
-        
-        # Comparer les dernières entrées (plus efficace)
-        video_times = [v['timestamp'] for v in self.video_buffer]
-        audio_times = [a['timestamp'] for a in self.audio_buffer]
-        
-        # Trouver l'entrée audio la plus proche de la dernière vidéo
-        if self.latest_video:
-            video_time = self.latest_video['timestamp']
-            closest_audio_idx = np.argmin(np.abs(np.array(audio_times) - video_time))
-            closest_audio = self.audio_buffer[closest_audio_idx]
-            
-            diff = abs(closest_audio['timestamp'] - video_time)
-            if diff < min_diff:
-                min_diff = diff
-                best_video = self.latest_video
-                best_audio = closest_audio
-        
-        # Trouver l'entrée vidéo la plus proche de la dernière audio
-        if self.latest_audio:
-            audio_time = self.latest_audio['timestamp']
-            closest_video_idx = np.argmin(np.abs(np.array(video_times) - audio_time))
-            closest_video = self.video_buffer[closest_video_idx]
-            
-            diff = abs(closest_video['timestamp'] - audio_time)
-            if diff < min_diff:
-                min_diff = diff
-                best_video = closest_video
-                best_audio = self.latest_audio
-        
-        # Si la différence est acceptable (moins de 100ms), mettre à jour les données synchronisées
-        if min_diff < 0.1:  # 100ms
-            self.current_sync_data = {
-                'video': best_video,
-                'audio': best_audio,
-                'timestamp': (best_video['timestamp'] + best_audio['timestamp']) / 2,
-                'sync_diff_ms': min_diff * 1000
-            }
-            
-            logger.debug(f"Synchronisation A/V réussie avec différence de {min_diff * 1000:.2f}ms")
-    
-    def get_synced_data(self, max_age_ms=500):
-        """
-        Récupère les dernières données audio/vidéo synchronisées.
-        
-        Args:
-            max_age_ms (int): Âge maximal en millisecondes des données synchronisées
-            
-        Returns:
-            dict: Données synchronisées ou None si pas de données récentes disponibles
-        """
-        with self.lock:
-            if not self.current_sync_data:
-                return None
-            
-            # Vérifier l'âge des données
-            age = (time.time() - self.current_sync_data['timestamp']) * 1000
-            if age > max_age_ms:
-                logger.debug(f"Données synchronisées trop anciennes: {age:.2f}ms > {max_age_ms}ms")
-                return None
-            
-            return self.current_sync_data
-    
-    def get_latest_data(self):
-        """
-        Récupère les dernières données audio et vidéo, même si elles ne sont pas parfaitement synchronisées.
+        Démarre la capture synchronisée audio/vidéo
         
         Returns:
-            dict: Dernières données audio et vidéo
+            bool: True si démarré avec succès, False sinon
         """
-        with self.lock:
-            return {
-                'video': self.latest_video,
-                'audio': self.latest_audio,
-                'timestamp': time.time(),
-                'sync_diff_ms': None  # Non synchronisé
-            }
+        if self.is_running:
+            self.logger.warning("La capture synchronisée est déjà en cours")
+            return True
+        
+        try:
+            # S'assurer que la connexion OBS est établie
+            if not self.obs_capture.connected:
+                if not self.obs_capture.connect():
+                    self.logger.error("Impossible de se connecter à OBS")
+                    return False
+            
+            # Démarrer la capture audio
+            if not self.audio_capture.start_capture():
+                self.logger.error("Impossible de démarrer la capture audio")
+                return False
+            
+            # Démarrer le thread de capture synchronisée
+            self.is_running = True
+            self.capture_thread = threading.Thread(target=self._capture_loop)
+            self.capture_thread.daemon = True
+            self.capture_thread.start()
+            
+            self.logger.info("Capture synchronisée démarrée")
+            return True
+        except Exception as e:
+            self.logger.error(f"Erreur lors du démarrage de la capture synchronisée: {str(e)}")
+            return False
     
-    def clear_buffers(self):
+    def stop(self):
         """
-        Vide les buffers audio et vidéo.
+        Arrête la capture synchronisée
+        
+        Returns:
+            bool: True si arrêté avec succès, False sinon
         """
-        with self.lock:
-            self.video_buffer.clear()
-            self.audio_buffer.clear()
-            logger.info("Buffers audio et vidéo vidés")
+        if not self.is_running:
+            return True
+        
+        try:
+            # Arrêter le thread de capture
+            self.is_running = False
+            if self.capture_thread:
+                self.capture_thread.join(timeout=2.0)
+            
+            # Arrêter la capture audio
+            self.audio_capture.stop_capture()
+            
+            self.logger.info("Capture synchronisée arrêtée")
+            return True
+        except Exception as e:
+            self.logger.error(f"Erreur lors de l'arrêt de la capture synchronisée: {str(e)}")
+            return False
+    
+    def _capture_loop(self):
+        """
+        Boucle principale de capture synchronisée qui s'exécute dans un thread séparé
+        """
+        self.logger.info("Thread de capture synchronisée démarré")
+        
+        while self.is_running:
+            try:
+                # 1. Capturer une frame vidéo depuis OBS
+                frame = self.obs_capture.get_video_frame(VIDEO_SOURCE_NAME)
+                
+                if frame is not None:
+                    # Ajouter au buffer avec horodatage
+                    timestamp = time.time()
+                    self.video_buffer.append({
+                        'frame': frame,
+                        'timestamp': timestamp
+                    })
+                
+                # 2. Dormir brièvement pour éviter de surcharger le CPU
+                time.sleep(0.03)  # ~30 FPS
+                
+            except Exception as e:
+                self.logger.error(f"Erreur dans la boucle de capture: {str(e)}")
+                time.sleep(0.1)  # Pause en cas d'erreur
+    
+    def get_synchronized_data(self):
+        """
+        Récupère une paire synchronisée de données audio et vidéo
+        
+        Returns:
+            dict: Dictionnaire contenant les données audio et vidéo synchronisées et leurs métadonnées
+        """
+        if not self.is_running or len(self.video_buffer) == 0:
+            return None
+        
+        try:
+            # 1. Récupérer la dernière frame vidéo du buffer
+            video_data = self.video_buffer[-1]
+            video_frame = video_data['frame']
+            video_timestamp = video_data['timestamp']
+            
+            # 2. Récupérer les données audio actuelles
+            audio_data = self.audio_capture.get_audio_data(duration_ms=500)
+            
+            if audio_data is None:
+                return None
+            
+            # 3. Traiter les données vidéo et audio
+            processed_video = self.processor.process_video(video_frame)
+            processed_audio = self.processor.process_audio(audio_data['samples'])
+            
+            if processed_video is None or processed_audio is None:
+                return None
+            
+            # 4. Combiner les résultats
+            result = {
+                'video': {
+                    'frame': video_frame,
+                    'processed': processed_video,
+                    'timestamp': video_timestamp
+                },
+                'audio': {
+                    'data': audio_data,
+                    'processed': processed_audio,
+                    'timestamp': audio_data.get('timestamp', time.time())
+                },
+                'sync_offset': abs(video_timestamp - audio_data.get('timestamp', time.time()))
+            }
+            
+            return result
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération des données synchronisées: {str(e)}")
+            return None
+    
+    def save_synchronized_clip(self, duration_seconds=5, prefix="clip"):
+        """
+        Sauvegarde un clip synchronisé de la durée spécifiée
+        
+        Args:
+            duration_seconds (int, optional): Durée du clip en secondes. Défaut à 5.
+            prefix (str, optional): Préfixe pour les noms de fichiers. Défaut à "clip".
+            
+        Returns:
+            dict: Dictionnaire contenant les chemins des fichiers sauvegardés et les métadonnées
+        """
+        if not self.is_running:
+            self.logger.warning("Impossible de sauvegarder: pas de capture en cours")
+            return None
+        
+        try:
+            # Générer les noms de fichiers
+            timestamp = int(time.time())
+            video_filename = os.path.join(self.temp_dir, f"{prefix}_video_{timestamp}.avi")
+            audio_filename = os.path.join(self.temp_dir, f"{prefix}_audio_{timestamp}.wav")
+            
+            # 1. Sauvegarder l'audio
+            audio_saved = self.audio_capture.save_audio_to_file(audio_filename, duration_seconds)
+            
+            # 2. Sauvegarder la vidéo (récupérer les dernières frames du buffer)
+            video_saved = False
+            
+            if len(self.video_buffer) > 0:
+                # Déterminer le nombre de frames à garder (supposons 30 FPS)
+                frames_to_keep = min(len(self.video_buffer), int(duration_seconds * 30))
+                frames = [item['frame'] for item in list(self.video_buffer)[-frames_to_keep:]]
+                
+                if frames:
+                    # Créer une vidéo à partir des frames
+                    height, width = frames[0].shape[:2]
+                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                    out = cv2.VideoWriter(video_filename, fourcc, 30.0, (width, height))
+                    
+                    for frame in frames:
+                        out.write(frame)
+                    
+                    out.release()
+                    video_saved = True
+            
+            # 3. Retourner les informations
+            result = {
+                'success': audio_saved and video_saved,
+                'video_path': video_filename if video_saved else None,
+                'audio_path': audio_filename if audio_saved else None,
+                'duration': duration_seconds,
+                'timestamp': timestamp
+            }
+            
+            if result['success']:
+                self.logger.info(f"Clip synchronisé sauvegardé: vidéo={video_filename}, audio={audio_filename}")
+            else:
+                self.logger.warning(f"Problème lors de la sauvegarde du clip: vidéo={video_saved}, audio={audio_saved}")
+            
+            return result
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la sauvegarde du clip synchronisé: {str(e)}")
+            return None
+    
+    def close(self):
+        """
+        Ferme proprement toutes les ressources
+        """
+        try:
+            # Arrêter la capture
+            self.stop()
+            
+            # Fermer les captures
+            self.audio_capture.close()
+            self.obs_capture.disconnect()
+            
+            self.logger.info("Gestionnaire de synchronisation fermé")
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la fermeture du gestionnaire de synchronisation: {str(e)}")
+    
+    def get_audio_devices(self):
+        """
+        Récupère la liste des périphériques audio disponibles
+        
+        Returns:
+            list: Liste des périphériques audio
+        """
+        return self.audio_capture.get_devices()
+    
+    def set_audio_device(self, device_index):
+        """
+        Change le périphérique audio de capture
+        
+        Args:
+            device_index (int): Indice du périphérique à utiliser
+            
+        Returns:
+            bool: True si changé avec succès, False sinon
+        """
+        # Si la capture est en cours, l'arrêter temporairement
+        was_running = self.is_running
+        if was_running:
+            self.stop()
+        
+        # Changer de périphérique
+        result = self.audio_capture.stop_capture()
+        if result:
+            result = self.audio_capture.start_capture(device_index)
+        
+        # Redémarrer la capture si nécessaire
+        if was_running and result:
+            self.start()
+        
+        return result
