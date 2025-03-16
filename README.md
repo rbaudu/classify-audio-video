@@ -110,6 +110,14 @@ cd classify-audio-video
 pip install -r requirements.txt
 ```
 
+### Note sur l'installation de PyAudio
+
+PyAudio est inclus dans le fichier requirements.txt et s'installera normalement avec `pip install -r requirements.txt`. Cependant, si vous rencontrez des problèmes lors de l'installation de PyAudio :
+
+- **Windows** : Essayez `pip install pyaudio` directement, ou téléchargez le fichier wheel approprié depuis [le site de Christoph Gohlke](https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio)
+- **macOS** : Installez d'abord PortAudio avec `brew install portaudio`, puis `pip install pyaudio`
+- **Linux (Ubuntu/Debian)** : Installez les dépendances avec `sudo apt-get install python3-dev portaudio19-dev`, puis `pip install pyaudio`
+
 3. Configuration d'OBS Studio (instructions détaillées ci-dessous)
 
 4. Configurez l'application :
