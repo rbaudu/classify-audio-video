@@ -45,6 +45,23 @@ class DBManager:
         conn.row_factory = sqlite3.Row  # Pour accéder aux colonnes par nom
         return conn
     
+    def check_connection(self):
+        """
+        Vérifie si la connexion à la base de données fonctionne
+        
+        Returns:
+            bool: True si la connexion fonctionne, False sinon
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
+            result = cursor.fetchone()
+            return result is not None and result[0] == 1
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la vérification de la connexion à la base de données: {str(e)}")
+            return False
+    
     def initialize_db(self):
         """
         Initialise la base de données en créant les tables si elles n'existent pas
