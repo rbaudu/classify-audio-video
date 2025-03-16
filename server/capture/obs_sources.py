@@ -2,6 +2,7 @@ import logging
 import cv2
 import numpy as np
 import base64
+import time
 from io import BytesIO
 from PIL import Image
 from obswebsocket import requests
@@ -16,6 +17,21 @@ class OBSSourcesMixin:
     Mixin pour la gestion des sources OBS.
     Ces méthodes sont intégrées à la classe OBSCapture.
     """
+    
+    def _initialize_capture_state(self):
+        """
+        Initialise l'état de capture pour la gestion des erreurs répétées
+        """
+        # Compteur d'erreurs consécutives pour la capture vidéo
+        self.consecutive_capture_errors = 0
+        # Nombre maximum d'erreurs consécutives avant temporisation
+        self.max_consecutive_errors = 5
+        # Horodatage de la dernière temporisation
+        self.last_backoff_time = 0
+        # Durée de temporisation en secondes (augmente progressivement)
+        self.current_backoff_duration = 5
+        # Durée maximale de temporisation
+        self.max_backoff_duration = 60
     
     def _refresh_sources(self):
         """
@@ -104,6 +120,71 @@ class OBSSourcesMixin:
         ]
         return type_id in media_types
     
+    def _should_attempt_capture(self):
+        """
+        Détermine si une tentative de capture doit être effectuée ou si on est en période de temporisation
+        
+        Returns:
+            bool: True si on peut tenter une capture, False si on est en temporisation
+        """
+        current_time = time.time()
+        
+        # Si nous sommes encore en période de temporisation
+        if self.consecutive_capture_errors >= self.max_consecutive_errors:
+            time_since_backoff = current_time - self.last_backoff_time
+            
+            # Si la période de temporisation n'est pas encore terminée
+            if time_since_backoff < self.current_backoff_duration:
+                return False
+            
+            # La période de temporisation est terminée, on réinitialise le compteur
+            self.consecutive_capture_errors = 0
+            self.logger.info(f"Période de temporisation terminée après {self.current_backoff_duration} secondes. Reprise des tentatives de capture.")
+            
+            # On augmente la durée de la prochaine temporisation, avec un maximum
+            self.current_backoff_duration = min(self.current_backoff_duration * 2, self.max_backoff_duration)
+        
+        return True
+    
+    def _handle_capture_success(self):
+        """
+        Appelé quand une capture réussit
+        """
+        # Réinitialiser le compteur d'erreurs et la durée de temporisation
+        if self.consecutive_capture_errors > 0:
+            self.consecutive_capture_errors = 0
+            self.current_backoff_duration = 5  # Réinitialiser à la valeur initiale
+            self.logger.info("Capture réussie, réinitialisation du compteur d'erreurs")
+    
+    def _handle_capture_error(self, error_message):
+        """
+        Gère une erreur de capture et met à jour l'état
+        
+        Args:
+            error_message (str): Message d'erreur
+        
+        Returns:
+            bool: True si c'est la première erreur, False si c'est une erreur répétée
+        """
+        self.consecutive_capture_errors += 1
+        
+        # Si c'est la première erreur ou une erreur intermédiaire
+        if self.consecutive_capture_errors < self.max_consecutive_errors:
+            return True
+        
+        # Si on atteint le seuil d'erreurs consécutives
+        if self.consecutive_capture_errors == self.max_consecutive_errors:
+            self.last_backoff_time = time.time()
+            self.logger.warning(
+                f"Atteint {self.max_consecutive_errors} erreurs consécutives. "
+                f"Temporisation pendant {self.current_backoff_duration} secondes. "
+                f"Erreur : {error_message}"
+            )
+            return True
+        
+        # On est au-delà du seuil, on ne log pas cette erreur
+        return False
+    
     def get_video_frame(self, source_name=None):
         """
         Récupère une image de la source vidéo spécifiée ou la source par défaut
@@ -127,6 +208,14 @@ class OBSSourcesMixin:
             if not source_name:
                 source_name = VIDEO_SOURCE_NAME
             
+            # Vérifier si on doit tenter une capture ou si on est en période de temporisation
+            if not self._should_attempt_capture():
+                # Si on est en temporisation, on retourne la dernière image réussie ou une image noire
+                if self.last_successful_frame is not None:
+                    return self.last_successful_frame
+                dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+                return dummy_frame
+            
             try:
                 # Appel à l'API OBS pour récupérer une capture d'écran de la source
                 self.logger.info(f"Tentative de capture d'image pour la source: {source_name}")
@@ -137,16 +226,21 @@ class OBSSourcesMixin:
                     height=360
                 ))
                 
-                # Ajout de logs de débogage pour diagnostiquer l'erreur 'img'
-                self.logger.info(f"Réponse brute de TakeSourceScreenshot: {response.datain}")
-                
                 # Récupérer les données de l'image en base64
                 img_data = response.getImg()
-                self.logger.info(f"Type de img_data: {type(img_data)}, Longueur: {len(str(img_data)) if img_data else 'None'}")
                 
                 # Vérifier si img_data est valide
                 if not img_data:
-                    raise ValueError("Réponse d'image vide reçue d'OBS")
+                    if self._handle_capture_error("Réponse d'image vide reçue d'OBS"):
+                        self.logger.error("Réponse d'image vide reçue d'OBS")
+                    
+                    # Retourner la dernière frame réussie si disponible
+                    if self.last_successful_frame is not None:
+                        return self.last_successful_frame
+                    
+                    # Générer une image noire de remplacement pour éviter les erreurs en aval
+                    dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+                    return dummy_frame
                 
                 # Supprimer le préfixe data:image/png;base64,
                 if "base64," in img_data:
@@ -160,24 +254,29 @@ class OBSSourcesMixin:
                 # Convertir en format OpenCV
                 frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
                 
+                # La capture a réussi
+                self._handle_capture_success()
+                
                 self.current_frame = frame
                 self.last_successful_frame = frame
                 return frame
             except Exception as e:
-                self.logger.error(f"Erreur lors de la capture d'image: {str(e)}")
-                
+                error_message = str(e)
                 # Si l'erreur indique une perte de connexion, tenter de se reconnecter
-                if self._is_connection_error(str(e)):
+                if self._is_connection_error(error_message):
                     self.logger.warning("Connexion perdue lors de la capture d'image. Tentative de reconnecter...")
                     self._handle_connection_lost()
                     
                     # Retourner la dernière frame réussie si disponible
                     if self.last_successful_frame is not None:
                         return self.last_successful_frame
+                else:
+                    # Pour les autres erreurs, gérer la temporisation
+                    if self._handle_capture_error(error_message):
+                        self.logger.error(f"Erreur lors de la capture d'image: {error_message}")
                 
                 # Générer une image noire de remplacement pour éviter les erreurs en aval
                 dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
-                self.logger.info("Génération d'une image noire de remplacement")
                 return dummy_frame
     
     def get_current_frame(self):
