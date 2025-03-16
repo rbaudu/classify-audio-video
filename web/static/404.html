@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page non trouvée - Classify Audio Video</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            padding-top: 60px;
+        }
+        .error-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 2rem;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 1rem;
+        }
+        .error-message {
+            font-size: 2rem;
+            margin-bottom: 2rem;
+        }
+        .error-details {
+            max-width: 600px;
+            margin-bottom: 2rem;
+        }
+        .home-button {
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Classify Audio Video</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Accueil</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard">Tableau de bord</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/statistics">Statistiques</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/history">Historique</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main class="error-container">
+        <div class="error-code">404</div>
+        <h1 class="error-message">Page non trouvée</h1>
+        <div class="error-details">
+            <p>Désolé, la page que vous recherchez n'existe pas ou a été déplacée.</p>
+            <p>Veuillez vérifier l'URL ou utiliser la navigation pour accéder à une autre section de l'application.</p>
+        </div>
+        <a href="/" class="btn btn-primary btn-lg home-button">Retour à l'accueil</a>
+    </main>
+
+    <footer class="footer mt-auto py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">Classify Audio Video &copy; 2025</span>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
