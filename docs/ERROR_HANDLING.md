@@ -149,25 +149,51 @@ Ce système de gestion d'erreurs offre plusieurs avantages :
 
 L'application comprend plusieurs stratégies de reprise automatique après erreur :
 
-1. **Reconnexion automatique à OBS** :
-   - En cas de perte de connexion à OBS, l'application tente automatiquement de se reconnecter
-   - Un mécanisme de backoff exponentiel évite la surcharge du serveur OBS
-   - Après un certain nombre de tentatives, l'erreur est remontée à l'utilisateur
+### 1. Reconnexion automatique à OBS
 
-2. **Récupération des erreurs de base de données** :
-   - Les transactions sont sécurisées avec des points de contrôle
-   - En cas d'erreur d'écriture, l'application essaie de réutiliser la dernière connexion valide
-   - Les problèmes d'intégrité sont détectés et signalés clairement
+L'application intègre un mécanisme robuste de reconnexion WebSocket avec OBS Studio, permettant une gestion autonome des pertes de connexion. Ce système présente les caractéristiques suivantes :
 
-3. **Gestion des erreurs de services externes** :
-   - Les données à envoyer sont mises en cache en cas d'échec de connexion
-   - L'application retente l'envoi lors des prochains cycles d'analyse
-   - Un mécanisme de file d'attente évite la perte de données
+#### Caractéristiques principales
+- **Détection intelligente des erreurs de connexion** : Analyse des messages d'erreur pour identifier différents types de problèmes de connexion.
+- **Backoff exponentiel avec jitter** : Augmentation progressive des délais entre les tentatives de reconnexion avec une composante aléatoire pour éviter les tempêtes de connexion.
+- **Suivi du temps de perte de connexion** : Mesure précise de la durée des interruptions de service.
+- **Gestion des événements WebSocket** : Détection automatique des événements `ConnectionClosed` et `ExitStarted` d'OBS pour déclencher le processus de reconnexion.
+- **Paramétrage flexible** : Configuration du nombre maximum de tentatives et des intervalles de reconnexion.
 
-4. **Récupération des erreurs de capture** :
-   - En cas d'erreur de capture audio, l'application peut basculer sur un autre périphérique
-   - En cas d'erreur de capture vidéo, l'application utilise les dernières images valides
-   - Les problèmes de synchronisation sont détectés et corrigés automatiquement si possible
+#### Implémentation technique
+- **Verrous thread-safe** : Protection de l'accès concurrent à la connexion WebSocket via un RLock.
+- **Détection centralisée des erreurs** : Fonction `_is_connection_error()` qui reconnaît plus de 10 types de messages d'erreur liés aux connexions.
+- **Gestion unifiée des pertes de connexion** : Méthode `_handle_connection_lost()` qui centralise la logique de reconnexion.
+- **Conservation d'état** : Mémorisation des dernières frames vidéo réussies et des états des médias pour assurer la continuité du service.
+- **Journalisation détaillée** : Traçage de toutes les étapes de reconnexion et mesure des temps d'indisponibilité.
+
+#### Exemple de flux de reconnexion
+
+1. Une erreur de connexion est détectée lors d'un appel à l'API OBS.
+2. La méthode `_handle_connection_lost()` est appelée pour initialiser la procédure de reconnexion.
+3. Un thread de reconnexion est lancé avec un backoff exponentiel pour les tentatives successives.
+4. À chaque reconnexion réussie, l'application rétablit automatiquement son état précédent.
+5. Si la reconnexion échoue après le nombre maximum de tentatives, l'erreur est propagée au niveau supérieur.
+
+Cette implémentation assure une continuité de service maximale, même en cas d'instabilité de la connexion avec OBS Studio, de redémarrage d'OBS ou de problèmes réseau temporaires.
+
+### 2. Récupération des erreurs de base de données
+
+- Les transactions sont sécurisées avec des points de contrôle
+- En cas d'erreur d'écriture, l'application essaie de réutiliser la dernière connexion valide
+- Les problèmes d'intégrité sont détectés et signalés clairement
+
+### 3. Gestion des erreurs de services externes
+
+- Les données à envoyer sont mises en cache en cas d'échec de connexion
+- L'application retente l'envoi lors des prochains cycles d'analyse
+- Un mécanisme de file d'attente évite la perte de données
+
+### 4. Récupération des erreurs de capture
+
+- En cas d'erreur de capture audio, l'application peut basculer sur un autre périphérique
+- En cas d'erreur de capture vidéo, l'application utilise les dernières images valides
+- Les problèmes de synchronisation sont détectés et corrigés automatiquement si possible
 
 ## Implémentation technique
 
