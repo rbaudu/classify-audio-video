@@ -5,15 +5,22 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 
 ## Nouveautés
 
+### Restructuration du code
+La dernière mise à jour apporte une restructuration majeure du code pour améliorer sa lisibilité, sa maintenabilité et son extensibilité. Le code est désormais organisé en modules plus petits et spécialisés, ce qui facilite :
+- Le développement et la maintenance de fonctionnalités spécifiques
+- La collaboration entre développeurs
+- L'implémentation de tests unitaires
+- L'extension et l'évolution de l'application
+
 ### Capture Audio via PyAudio
-La dernière mise à jour apporte une amélioration majeure : la capture audio est désormais réalisée directement via PyAudio au lieu d'OBS. Cette modification permet :
+La mise à jour précédente a apporté une amélioration majeure : la capture audio est désormais réalisée directement via PyAudio au lieu d'OBS. Cette modification permet :
 - Une capture audio haute qualité directement depuis le microphone
 - Le maintien de la capture vidéo via OBS
 - Une synchronisation précise entre les flux audio et vidéo
 - Une analyse plus précise grâce à des données audio réelles (et non simulées)
 
 ### Gestionnaire de synchronisation
-Un nouveau système de synchronisation audio/vidéo a été ajouté pour garantir que les flux audio et vidéo sont correctement alignés temporellement. Ce système permet :
+Un système de synchronisation audio/vidéo a été ajouté pour garantir que les flux audio et vidéo sont correctement alignés temporellement. Ce système permet :
 - La capture simultanée de l'audio via PyAudio et de la vidéo via OBS
 - L'alignement temporel des deux flux pour l'analyse
 - La sauvegarde de clips synchronisés pour analyse ultérieure
@@ -36,6 +43,7 @@ De nouvelles API ont été ajoutées pour gérer les périphériques audio :
 - **Interface web** : Visualisation des données et tableaux de bord en temps réel
 - **API externe** : Envoi des résultats vers un service tiers via HTTP POST
 - **Analyse de fichiers vidéo** : Prise en charge des fichiers médias chargés dans OBS pour analyse complète ou image par image
+- **Exportation de données** : Export des analyses en formats JSON et CSV
 
 ## Structure du projet
 
@@ -50,7 +58,9 @@ classify-audio-video/
 │   ├── config.py                 # Configuration de l'application
 │   ├── analysis/                 # Module d'analyse et classification
 │   │   ├── __init__.py
-│   │   └── activity_classifier.py # Classificateur d'activité
+│   │   ├── activity_classifier.py # Classificateur d'activité
+│   │   ├── analysis_manager.py    # Gestionnaire de boucle d'analyse d'activité
+│   │   └── video_analysis.py      # Fonctions d'analyse de vidéos
 │   ├── api/                      # Module d'API et services externes
 │   │   ├── __init__.py
 │   │   └── external_service.py   # Client pour le service externe
@@ -60,9 +70,16 @@ classify-audio-video/
 │   │   ├── pyaudio_capture.py    # Capture audio via PyAudio
 │   │   ├── sync_manager.py       # Gestionnaire de synchronisation audio/vidéo
 │   │   └── stream_processor.py   # Traitement des flux audio/vidéo
-│   └── database/                 # Module de stockage des données
+│   ├── database/                 # Module de stockage des données
+│   │   ├── __init__.py
+│   │   └── db_manager.py         # Gestionnaire de base de données SQLite
+│   ├── routes/                   # Module de routage web et API
+│   │   ├── __init__.py
+│   │   ├── api_routes.py         # Routes pour l'API REST
+│   │   └── web_routes.py         # Routes pour l'interface web
+│   └── utils/                    # Utilitaires divers
 │       ├── __init__.py
-│       └── db_manager.py         # Gestionnaire de base de données SQLite
+│       └── formatting.py         # Fonctions de formatage (temps, etc.)
 ├── web/                          # Interface web
 │   ├── templates/                # Gabarits HTML
 │   │   ├── index.html            # Page d'accueil
@@ -215,7 +232,22 @@ http://localhost:5000
    - Cliquez sur "Analyser cette image" pour classifier l'image actuelle
    - Ou cliquez sur "Analyser la vidéo complète" pour une analyse de toute la vidéo
 
+6. Pour exporter les résultats d'analyse :
+   - Après l'analyse d'une vidéo, accédez à l'écran des résultats
+   - Utilisez les boutons d'exportation pour obtenir les données en format :
+     - CSV : Pour analyse dans des tableurs (Excel, Google Sheets)
+     - JSON : Pour intégration dans d'autres applications
+
 ## Fonctionnement technique
+
+### Architecture modulaire
+
+La nouvelle architecture modulaire divise le code en composants spécialisés :
+1. **main.py** : Point d'entrée principal avec la fonction `start_server()` gérant le démarrage et l'arrêt propre
+2. **analysis_manager.py** : Gestion de la boucle d'analyse périodique
+3. **video_analysis.py** : Analyse de vidéos complètes et génération de timeline
+4. **web_routes.py** et **api_routes.py** : Séparation des routes web et API
+5. **formatting.py** : Fonctions utilitaires partagées
 
 ### Capture de flux et synchronisation
 
@@ -277,6 +309,16 @@ Le processus d'analyse de fichiers vidéo fonctionne comme suit :
    - Une fois l'analyse terminée, les résultats sont affichés avec des graphiques et statistiques
    - Les résultats peuvent être exportés en CSV ou JSON
 
+### Exportation de données
+
+Les fonctionnalités d'exportation permettent :
+- **Export CSV** avec colonnes détaillées incluant :
+  - Horodatage et temps formaté
+  - Type d'activité et niveau de confiance
+  - Scores de confiance pour chaque type d'activité
+  - Caractéristiques audio/vidéo extraites
+- **Export JSON** avec tous les détails des analyses pour une intégration facile avec d'autres systèmes
+
 ### Envoi au service externe
 
 La classe `ExternalServiceClient` envoie les résultats toutes les 5 minutes via une requête HTTP POST au service configuré.
@@ -309,6 +351,26 @@ La classe `ExternalServiceClient` envoie les résultats toutes les 5 minutes via
 - Vérifiez que les sources média sont correctement ajoutées et visibles dans OBS
 - Si une analyse vidéo échoue, consultez les journaux d'OBS et de l'application
 - Pour les vidéos longues, augmentez l'intervalle d'échantillonnage pour réduire le temps d'analyse
+
+## Développement et extension
+
+Grâce à la nouvelle architecture modulaire, l'extension de l'application est simplifiée :
+
+1. **Ajout de nouvelles fonctionnalités** :
+   - Analyseurs : ajoutez des fichiers dans `server/analysis/`
+   - Routes API : étendez `server/routes/api_routes.py`
+   - Interface utilisateur : modifiez les templates dans `web/templates/`
+
+2. **Modification des algorithmes d'analyse** :
+   - Pour changer la détection de mouvement, modifiez `stream_processor.py`
+   - Pour ajuster les règles de classification, modifiez `activity_classifier.py`
+
+3. **Tests unitaires** :
+   - Chaque module peut désormais être testé indépendamment
+   - Créez un dossier `tests/` parallèle à `server/` pour organiser vos tests
+
+4. **Développement collaboratif** :
+   - Différents développeurs peuvent travailler sur différents modules sans interférence
 
 ## Contribution
 
