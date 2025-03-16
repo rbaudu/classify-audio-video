@@ -27,10 +27,18 @@ EXTERNAL_SERVICE_API_KEY = Config.EXTERNAL_SERVICE_API_KEY
 # Configuration des activités
 ACTIVITY_CLASSES = Config.ACTIVITY_CLASSES
 
-# Configuration des paramètres de capture
+# Configuration des paramètres de capture vidéo
 VIDEO_RESOLUTION = Config.VIDEO_RESOLUTION
+
+# Configuration des paramètres de capture audio
 AUDIO_SAMPLE_RATE = Config.AUDIO_SAMPLE_RATE
 AUDIO_CHANNELS = Config.AUDIO_CHANNELS
+AUDIO_FORMAT = Config.AUDIO_FORMAT
+AUDIO_CHUNK_SIZE = Config.AUDIO_CHUNK_SIZE
+
+# Configuration audio/vidéo
+USE_DIRECT_AUDIO_CAPTURE = Config.USE_DIRECT_AUDIO_CAPTURE
+AUDIO_VIDEO_SYNC_BUFFER_SIZE = Config.AUDIO_VIDEO_SYNC_BUFFER_SIZE
 
 # Configuration des intervalles
 ANALYSIS_INTERVAL = Config.ANALYSIS_INTERVAL
