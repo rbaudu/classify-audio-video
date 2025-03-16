@@ -55,6 +55,25 @@ OSError: [Errno 98] Address already in use
    - Redémarrez OBS et réessayez
    - Vérifiez la version d'OBS et du plugin obs-websocket pour vous assurer qu'ils sont compatibles
 
+### Reconnexion automatique à OBS
+
+Le système intègre désormais une fonctionnalité de reconnexion automatique à OBS qui gère les interruptions de connexion WebSocket :
+
+1. **En cas de perte de connexion**
+   - L'application détecte automatiquement les pertes de connexion WebSocket
+   - Une tentative de reconnexion est lancée immédiatement et répétée à intervalles croissants
+   - Les opérations reprennent automatiquement après reconnexion réussie
+
+2. **Paramètres de reconnexion configurables**
+   - Pour ajuster le comportement de reconnexion, vous pouvez modifier ces valeurs dans le fichier `server/capture/obs_capture.py` :
+     - `reconnect_interval` (défaut: 5 secondes) : intervalle initial entre les tentatives
+     - `max_reconnect_interval` (défaut: 60 secondes) : intervalle maximum entre les tentatives
+     - `max_reconnect_attempts` (défaut: 0 = illimité) : nombre maximum de tentatives de reconnexion
+
+3. **Vérification manuelle de la connexion**
+   - Vous pouvez appeler l'API `/api/status` pour vérifier l'état de la connexion OBS
+   - La méthode `is_connected()` de la classe `OBSCapture` peut être utilisée dans le code pour vérifier l'état
+
 ### Pas de flux vidéo depuis OBS
 
 ```
@@ -71,6 +90,10 @@ OSError: [Errno 98] Address already in use
 
 3. **Résolution trop élevée**
    - Réduisez la résolution dans OBS pour diminuer la charge
+
+4. **Problèmes de connexion intermittents**
+   - En cas d'interruptions fréquentes, l'application conserve la dernière image valide
+   - Vérifiez la stabilité de votre connexion réseau si OBS est exécuté sur une machine distante
 
 ## Problèmes audio
 
