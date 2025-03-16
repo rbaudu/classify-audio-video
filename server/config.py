@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import pyaudio
 
 class Config:
     # Configuration de l'application Flask
@@ -35,10 +36,20 @@ class Config:
         'inactif'
     ]
     
-    # Configuration des paramètres de capture
+    # Configuration des paramètres de capture vidéo
     VIDEO_RESOLUTION = (640, 480)
+    
+    # Configuration des paramètres de capture audio via PyAudio
     AUDIO_SAMPLE_RATE = 16000
     AUDIO_CHANNELS = 1
+    AUDIO_FORMAT = pyaudio.paInt16  # Format 16-bit pour l'audio
+    AUDIO_CHUNK_SIZE = 1024         # Taille des chunks audio
+    
+    # Activation de la capture audio directe (PyAudio) vs OBS
+    USE_DIRECT_AUDIO_CAPTURE = True  # True = PyAudio, False = OBS (simulated)
+    
+    # Configuration de la synchronisation audio/vidéo
+    AUDIO_VIDEO_SYNC_BUFFER_SIZE = 5  # Nombre de secondes dans le buffer de synchronisation
     
     # Configuration des intervalles de temps (en secondes)
     ANALYSIS_INTERVAL = 300  # 5 minutes
