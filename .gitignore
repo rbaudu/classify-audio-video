@@ -1,0 +1,38 @@
+# Logs
+activity_classifier.log
+server.log
+
+# Database files
+data/activity.db
+data/temp_captures/
+data/analyses/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+server/__pycache__/
+server/analysis/__pycache__/
+server/api/__pycache__/
+server/capture/__pycache__/
+server/database/__pycache__/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
