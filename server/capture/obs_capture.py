@@ -13,9 +13,15 @@ import random
 from server import OBS_HOST, OBS_PORT, OBS_PASSWORD, VIDEO_SOURCE_NAME
 from server import OBS_RECONNECT_INTERVAL, OBS_MAX_RECONNECT_INTERVAL, OBS_MAX_RECONNECT_ATTEMPTS
 
-class OBSCapture:
+# Import des mixins OBS
+from server.capture.obs_sources import OBSSourcesMixin
+from server.capture.obs_events import OBSEventsMixin
+from server.capture.obs_media import OBSMediaMixin
+
+class OBSCapture(OBSSourcesMixin, OBSEventsMixin, OBSMediaMixin):
     """
-    Classe pour capturer les flux vidéo depuis OBS Studio via le plugin websocket
+    Classe pour capturer les flux vidéo depuis OBS Studio via le plugin websocket.
+    Cette classe centralise plusieurs fonctionnalités réparties dans des mixins.
     """
     
     def __init__(self):
@@ -220,3 +226,23 @@ class OBSCapture:
             # Enregistrer le moment où la connexion a été perdue
             if self.connection_lost_time is None:
                 self.connection_lost_time = time.time()
+    
+    def is_connected(self):
+        """
+        Vérifie si la connexion à OBS est active
+        
+        Returns:
+            bool: True si connecté, False sinon
+        """
+        with self.ws_lock:
+            if not self.connected:
+                return False
+                
+            try:
+                # Effectuer un appel simple pour vérifier la connexion
+                self.ws.call(requests.GetVersion())
+                return True
+            except Exception as e:
+                self.logger.warning(f"La connexion à OBS semble interrompue: {str(e)}")
+                self._handle_connection_lost()
+                return False
