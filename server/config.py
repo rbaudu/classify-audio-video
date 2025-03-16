@@ -16,10 +16,15 @@ class Config:
     OBS_PORT = int(os.environ.get('OBS_PORT') or 4455)
     OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or 'Me2Fai800h1VwthV'
     
+    # Configuration des sources OBS
+    VIDEO_SOURCE_NAME = os.environ.get('VIDEO_SOURCE_NAME') or 'acméra'  # Modifié par défaut pour correspondre à votre source actuelle
+    AUDIO_SOURCE_NAME = os.environ.get('AUDIO_SOURCE_NAME') or 'Default Audio Source'
+    
     # Configuration des chemins
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     DATABASE_PATH = os.path.join(BASE_DIR, '..', 'data', 'activity.db')
     MODEL_PATH = os.path.join(BASE_DIR, '..', 'models', 'activity_classifier.h5')
+    DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), 'data')
     
     # Configuration du service externe
     EXTERNAL_SERVICE_URL = os.environ.get('EXTERNAL_SERVICE_URL') or 'https://api.exemple.com/activity'
@@ -35,6 +40,27 @@ class Config:
         'occupé',
         'inactif'
     ]
+    
+    # Variables pour l'interface
+    ACTIVITY_ICONS = {
+        'endormi': 'moon',
+        'à table': 'utensils',
+        'lisant': 'book-open',
+        'au téléphone': 'phone',
+        'en conversation': 'users',
+        'occupé': 'briefcase',
+        'inactif': 'pause-circle'
+    }
+    
+    ACTIVITY_COLORS = {
+        'endormi': 'indigo',
+        'à table': 'orange',
+        'lisant': 'teal',
+        'au téléphone': 'purple',
+        'en conversation': 'blue',
+        'occupé': 'red',
+        'inactif': 'gray'
+    }
     
     # Configuration des paramètres de capture vidéo
     VIDEO_RESOLUTION = (640, 480)
@@ -53,3 +79,8 @@ class Config:
     
     # Configuration des intervalles de temps (en secondes)
     ANALYSIS_INTERVAL = 300  # 5 minutes
+    
+    # Configuration de reconnexion OBS WebSocket
+    OBS_RECONNECT_INTERVAL = 5      # Intervalle initial entre les tentatives de reconnexion (secondes)
+    OBS_MAX_RECONNECT_INTERVAL = 60  # Intervalle maximum entre les tentatives (secondes)
+    OBS_MAX_RECONNECT_ATTEMPTS = 0   # Nombre maximum de tentatives (0 = illimité)
