@@ -36,7 +36,7 @@ class SyncManager:
         self.processor = StreamProcessor()
         
         # Variables d'état
-        self.is_running = False
+        self._is_running = False  # Renamed to avoid conflict with is_running() method
         self.capture_thread = None
         
         # Événement d'arrêt
@@ -58,7 +58,7 @@ class SyncManager:
         Returns:
             bool: True si démarré avec succès, False sinon
         """
-        if self.is_running:
+        if self._is_running:
             self.logger.warning("La capture synchronisée est déjà en cours")
             return True
         
@@ -78,7 +78,7 @@ class SyncManager:
                 return False
             
             # Démarrer le thread de capture synchronisée
-            self.is_running = True
+            self._is_running = True
             self.capture_thread = threading.Thread(target=self._capture_loop)
             self.capture_thread.daemon = True
             self.capture_thread.start()
@@ -109,12 +109,12 @@ class SyncManager:
         Returns:
             bool: True si arrêté avec succès, False sinon
         """
-        if not self.is_running:
+        if not self._is_running:
             return True
         
         try:
             # Signaler l'arrêt
-            self.is_running = False
+            self._is_running = False
             self.stop_event.set()
             
             # Arrêter le thread de capture avec timeout
@@ -140,7 +140,7 @@ class SyncManager:
         """
         self.logger.info("Thread de capture synchronisée démarré")
         
-        while self.is_running and not self.stop_event.is_set():
+        while self._is_running and not self.stop_event.is_set():
             try:
                 # 1. Capturer une frame vidéo depuis OBS
                 frame = self.obs_capture.get_video_frame(VIDEO_SOURCE_NAME)
@@ -154,7 +154,7 @@ class SyncManager:
                     })
                 
                 # 2. Vérifier si on doit s'arrêter
-                if not self.is_running or self.stop_event.is_set():
+                if not self._is_running or self.stop_event.is_set():
                     break
                 
                 # 3. Dormir brièvement pour éviter de surcharger le CPU
@@ -167,7 +167,7 @@ class SyncManager:
                 time.sleep(0.1)
                 
                 # Vérifier si on doit s'arrêter même en cas d'erreur
-                if not self.is_running or self.stop_event.is_set():
+                if not self._is_running or self.stop_event.is_set():
                     break
         
         self.logger.info("Thread de capture synchronisée terminé")
@@ -179,7 +179,7 @@ class SyncManager:
         Returns:
             dict: Dictionnaire contenant les données audio et vidéo synchronisées et leurs métadonnées
         """
-        if not self.is_running or len(self.video_buffer) == 0:
+        if not self._is_running or len(self.video_buffer) == 0:
             return None
         
         try:
@@ -232,7 +232,7 @@ class SyncManager:
         Returns:
             dict: Dictionnaire contenant les chemins des fichiers sauvegardés et les métadonnées
         """
-        if not self.is_running:
+        if not self._is_running:
             self.logger.warning("Impossible de sauvegarder: pas de capture en cours")
             return None
         
@@ -320,7 +320,7 @@ class SyncManager:
             bool: True si changé avec succès, False sinon
         """
         # Si la capture est en cours, l'arrêter temporairement
-        was_running = self.is_running
+        was_running = self._is_running
         if was_running:
             self.stop()
         
@@ -342,4 +342,4 @@ class SyncManager:
         Returns:
             bool: True si la capture est en cours, False sinon
         """
-        return self.is_running
+        return self._is_running
