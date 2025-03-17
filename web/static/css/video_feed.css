@@ -1,0 +1,97 @@
+/* Styles pour le flux vidéo */
+
+.video-feed {
+    width: 100%;
+    height: 240px;
+    background-color: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.video-stream {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.no-feed-message {
+    color: #ccc;
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+}
+
+.audio-visualizer {
+    width: 100%;
+    height: 80px;
+    background-color: #111;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.no-audio-message {
+    color: #ccc;
+    font-size: 12px;
+    text-align: center;
+    padding: 10px;
+}
+
+/* Styles pour les contrôles de médias */
+.preview-controls {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Styles pour les boutons */
+.btn.small {
+    font-size: 12px;
+    padding: 4px 8px;
+    background-color: #333;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.btn.small:hover {
+    background-color: #444;
+}
+
+/* Animation de chargement */
+@keyframes pulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 1; }
+    100% { opacity: 0.5; }
+}
+
+.loading-message {
+    animation: pulse 1.5s infinite;
+    color: #aaa;
+}
+
+/* Indications visuelles pour la connexion */
+.status-indicator {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #f00; /* Rouge par défaut (déconnecté) */
+}
+
+.status-indicator.connected {
+    background-color: #0f0; /* Vert (connecté) */
+}
+
+.status-indicator.connecting {
+    background-color: #ff0; /* Jaune (en cours de connexion) */
+    animation: pulse 1s infinite;
+}
