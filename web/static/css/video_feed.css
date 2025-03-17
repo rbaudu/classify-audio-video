@@ -1,97 +1,181 @@
-/* Styles pour le flux vidéo */
+/**
+ * Styles spécifiques pour les flux vidéo et audio
+ */
 
+/* Conteneur principal du flux vidéo */
 .video-feed {
+    position: relative;
     width: 100%;
-    height: 240px;
-    background-color: #000;
-    border-radius: 8px;
+    min-height: 240px;
+    background-color: #0a0a0a;
+    border-radius: 6px;
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
-    position: relative;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
-.video-stream {
+/* Image ou flux vidéo */
+.video-image {
+    max-width: 100%;
+    max-height: 360px;
+    display: block;
+}
+
+/* Message d'erreur ou d'absence de flux */
+.no-feed-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 16px;
+    text-align: center;
+    padding: 15px;
+    border-radius: 5px;
+    background-color: rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    z-index: 2;
+}
+
+/* Indicateur de statut */
+.status-indicator {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    z-index: 3;
+    padding: 5px 10px;
+    background-color: rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+    font-size: 12px;
+    color: white;
+    max-width: 90%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.3s ease;
+}
+
+.status-indicator.active .status-ok {
+    color: #4caf50;
+}
+
+.status-indicator.error .status-error {
+    color: #ff5252;
+}
+
+/* Contrôles du flux vidéo */
+.preview-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+/* Visualiseur audio */
+.audio-visualizer {
+    position: relative;
+    width: 100%;
+    height: 100px;
+    background-color: #1a1a1a;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.audio-visualizer canvas {
     width: 100%;
     height: 100%;
-    object-fit: contain;
-}
-
-.no-feed-message {
-    color: #ccc;
-    font-size: 14px;
-    text-align: center;
-    padding: 20px;
-}
-
-.audio-visualizer {
-    width: 100%;
-    height: 80px;
-    background-color: #111;
-    border-radius: 8px;
-    overflow: hidden;
-    margin-top: 10px;
 }
 
 .no-audio-message {
-    color: #ccc;
-    font-size: 12px;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
     text-align: center;
-    padding: 10px;
 }
 
-/* Styles pour les contrôles de médias */
-.preview-controls {
-    margin-top: 10px;
+/* Barre de confiance pour les résultats de classification */
+.confidence-bar-container {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    margin-bottom: 10px;
 }
 
-/* Styles pour les boutons */
-.btn.small {
-    font-size: 12px;
-    padding: 4px 8px;
-    background-color: #333;
-    color: white;
-    border: none;
+.confidence-label {
+    width: 40%;
+    font-size: 14px;
+    padding-right: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.confidence-bar-wrapper {
+    flex-grow: 1;
+    height: 18px;
+    background-color: #eaeaea;
+    border-radius: 9px;
+    overflow: hidden;
+}
+
+.confidence-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4caf50, #8bc34a);
+    border-radius: 9px;
+    transition: width 0.5s ease-out;
+}
+
+.confidence-value {
+    width: 50px;
+    text-align: right;
+    font-size: 14px;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+/* Message d'information */
+.info-message {
+    padding: 15px;
+    margin: 20px 0;
+    background-color: #e3f2fd;
+    border-left: 4px solid #2196f3;
     border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.2s;
 }
 
-.btn.small:hover {
-    background-color: #444;
-}
-
-/* Animation de chargement */
+/* Animations de chargement */
 @keyframes pulse {
-    0% { opacity: 0.5; }
+    0% { opacity: 0.6; }
     50% { opacity: 1; }
-    100% { opacity: 0.5; }
+    100% { opacity: 0.6; }
 }
 
 .loading-message {
     animation: pulse 1.5s infinite;
-    color: #aaa;
+    color: rgba(255, 255, 255, 0.7);
 }
 
-/* Indications visuelles pour la connexion */
-.status-indicator {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background-color: #f00; /* Rouge par défaut (déconnecté) */
-}
-
-.status-indicator.connected {
-    background-color: #0f0; /* Vert (connecté) */
-}
-
-.status-indicator.connecting {
-    background-color: #ff0; /* Jaune (en cours de connexion) */
-    animation: pulse 1s infinite;
+/* Styles pour les médias de taille réduite */
+@media (max-width: 768px) {
+    .video-feed {
+        min-height: 180px;
+    }
+    
+    .audio-visualizer {
+        height: 70px;
+    }
+    
+    .confidence-label {
+        width: 35%;
+        font-size: 12px;
+    }
+    
+    .confidence-value {
+        font-size: 12px;
+        width: 40px;
+    }
 }
