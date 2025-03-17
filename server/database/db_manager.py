@@ -652,3 +652,17 @@ class DBManager:
         self._generate_fake_activities(start_time, end_time)
         
         logger.info("Création de données factices terminée")
+
+    def get_latest_activity(self):
+        """
+        Récupère la dernière activité enregistrée dans la base de données
+        """
+        try:
+            query = "SELECT * FROM activities ORDER BY timestamp DESC LIMIT 1"
+            result = self.execute_query(query)
+            if result and len(result) > 0:
+                return result[0]
+            return None
+        except Exception as e:
+            logging.error(f"Erreur lors de la récupération de la dernière activité: {str(e)}")
+            return None
