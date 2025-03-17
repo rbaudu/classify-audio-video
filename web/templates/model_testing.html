@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Classify Audio Video - Test du modèle</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/video_feed.css') }}">
 </head>
 <body>
     <header>
@@ -38,6 +39,7 @@
                         <div class="video-preview">
                             <div class="video-feed" id="video-feed">
                                 <div class="no-feed-message">Flux vidéo non disponible</div>
+                                <div class="status-indicator"></div>
                             </div>
                             <div class="preview-controls">
                                 <button id="refresh-feed" class="btn small">Rafraîchir</button>
