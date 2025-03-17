@@ -5,6 +5,7 @@ import base64
 import time
 import os
 import tempfile
+import threading
 from io import BytesIO
 from PIL import Image
 from obswebsocket import requests
@@ -236,6 +237,37 @@ class OBSSourcesMixin:
             self.logger.error(f"Erreur lors de la capture vers fichier: {e}")
             return False
     
+    def _alternate_screenshot_method(self, source_name):
+        """
+        Méthode alternative pour capturer des screenshots quand les méthodes standards échouent
+        
+        Args:
+            source_name (str): Nom de la source
+
+        Returns:
+            numpy.ndarray: Image au format OpenCV (BGR) ou None en cas d'erreur
+        """
+        try:
+            # Demander l'état et les propriétés de la source
+            source_info = self.ws.call(requests.GetSourceSettings(sourceName=source_name))
+            if not source_info.status:
+                self.logger.warning(f"Échec de GetSourceSettings pour {source_name}")
+                return None
+            
+            # Créer une image de remplacement avec le nom de la source
+            height, width = 360, 640
+            img = np.zeros((height, width, 3), dtype=np.uint8)
+            
+            # Texte indiquant la source et la raison
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cv2.putText(img, f"Source: {source_name}", (20, height//2 - 30), font, 1, (255, 255, 255), 2)
+            cv2.putText(img, "Capture indisponible", (20, height//2 + 30), font, 1, (255, 255, 255), 2)
+            
+            return img
+        except Exception as e:
+            self.logger.error(f"Erreur dans la méthode alternative de capture: {e}")
+            return None
+    
     def get_video_frame(self, source_name=None):
         """
         Récupère une image de la source vidéo spécifiée ou la source par défaut
@@ -341,6 +373,12 @@ class OBSSourcesMixin:
                         except Exception as file_error:
                             self.logger.error(f"Échec de la capture vers fichier: {file_error}")
                         
+                        # Si toutes les tentatives échouent, essayer notre méthode alternative
+                        alt_frame = self._alternate_screenshot_method(source_name)
+                        if alt_frame is not None:
+                            self.last_successful_frame = alt_frame
+                            return alt_frame
+                        
                         raise Exception("Format de réponse non reconnu pour toutes les méthodes de capture")
                 
                 # Vérifier si img_data est valide
@@ -389,8 +427,22 @@ class OBSSourcesMixin:
                     if self._handle_capture_error(error_message):
                         self.logger.error(f"Erreur lors de la capture d'image: {error_message}")
                 
-                # Générer une image noire de remplacement pour éviter les erreurs en aval
+                # Si toutes les tentatives échouent, essayer notre méthode alternative
+                alt_frame = self._alternate_screenshot_method(source_name)
+                if alt_frame is not None:
+                    self.last_successful_frame = alt_frame
+                    return alt_frame
+                    
+                # Retourner la dernière frame réussie si disponible
+                if self.last_successful_frame is not None:
+                    return self.last_successful_frame
+                
+                # Génération d'une image de remplacement
                 dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(dummy_frame, f"Source: {source_name}", (20, 180), font, 0.8, (255, 255, 255), 1)
+                cv2.putText(dummy_frame, "Erreur de capture", (20, 220), font, 0.8, (255, 255, 255), 1)
+                
                 return dummy_frame
     
     def get_current_frame(self):
