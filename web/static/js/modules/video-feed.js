@@ -7,7 +7,11 @@ const VideoFeed = {
     // État du flux vidéo
     state: {
         videoSnapshot: null,
-        videoStatusInterval: null
+        videoStatusInterval: null,
+        lastRefresh: 0,
+        refreshRate: 200, // ms entre les rafraîchissements
+        errorCount: 0,
+        maxErrors: 5
     },
 
     /**
@@ -38,19 +42,77 @@ const VideoFeed = {
         const videoImg = document.createElement('img');
         videoImg.classList.add('video-image');
         videoImg.alt = 'Flux vidéo en direct';
+        videoImg.onerror = () => {
+            this.handleImageError();
+        };
+        videoImg.onload = () => {
+            // Réinitialiser le compteur d'erreurs lors d'un chargement réussi
+            this.state.errorCount = 0;
+            
+            // Supprimer le message d'erreur s'il existe
+            const noFeedMsg = videoFeedContainer.querySelector('.no-feed-message');
+            if (noFeedMsg) {
+                noFeedMsg.style.display = 'none';
+            }
+        };
         videoFeedContainer.appendChild(videoImg);
+        
+        // Ajouter un message par défaut (caché initialement)
+        const noFeedMsg = document.createElement('div');
+        noFeedMsg.classList.add('no-feed-message');
+        noFeedMsg.textContent = 'Flux vidéo non disponible';
+        noFeedMsg.style.display = 'none';
+        videoFeedContainer.appendChild(noFeedMsg);
         
         // Fonction pour mettre à jour l'image
         const updateVideoImage = () => {
-            // Ajouter un timestamp pour éviter le cache du navigateur
-            videoImg.src = `/api/video-snapshot?t=${new Date().getTime()}`;
+            const now = Date.now();
+            if (now - this.state.lastRefresh >= this.state.refreshRate) {
+                this.state.lastRefresh = now;
+                
+                // Ajouter un timestamp pour éviter le cache du navigateur
+                videoImg.src = `/api/video-snapshot?t=${now}`;
+                
+                // Afficher dans la console un message périodique pour le débogage
+                if (Math.random() < 0.05) { // ~5% des rafraîchissements
+                    console.log(`Mise à jour de l'image à ${new Date().toLocaleTimeString()}`);
+                }
+            }
+            
+            // Planifier la prochaine mise à jour via requestAnimationFrame pour de meilleures performances
+            if (this.state.videoSnapshot) {
+                cancelAnimationFrame(this.state.videoSnapshot);
+            }
+            this.state.videoSnapshot = requestAnimationFrame(updateVideoImage);
         };
         
-        // Mettre à jour l'image immédiatement puis toutes les 200ms
+        // Mettre à jour l'image immédiatement puis continuellement avec requestAnimationFrame
         updateVideoImage();
-        this.state.videoSnapshot = setInterval(updateVideoImage, 200);
         
         console.log('Flux vidéo initialisé');
+    },
+    
+    /**
+     * Gère les erreurs de chargement d'image
+     */
+    handleImageError: function() {
+        this.state.errorCount++;
+        const videoFeedContainer = document.getElementById('video-feed');
+        if (!videoFeedContainer) return;
+        
+        const noFeedMsg = videoFeedContainer.querySelector('.no-feed-message');
+        
+        if (this.state.errorCount > this.state.maxErrors) {
+            // Après plusieurs échecs, afficher le message d'erreur
+            if (noFeedMsg) {
+                noFeedMsg.style.display = 'block';
+            }
+            
+            console.error(`Erreur de chargement d'image après ${this.state.errorCount} tentatives`);
+            
+            // Ajuster le taux de rafraîchissement pour ne pas surcharger le serveur
+            this.state.refreshRate = Math.min(2000, this.state.refreshRate * 1.5);
+        }
     },
     
     /**
@@ -79,10 +141,15 @@ const VideoFeed = {
                     indicator.innerHTML = `<span class="status-ok">Caméra active: ${data.currentSource}</span>`;
                     indicator.classList.add('active');
                     indicator.classList.remove('error');
+                    
+                    // Si tout est OK, revenir à un taux de rafraîchissement normal
+                    this.state.refreshRate = 200;
                 } else {
                     indicator.innerHTML = `<span class="status-error">${data.message}</span>`;
                     indicator.classList.add('error');
                     indicator.classList.remove('active');
+                    
+                    console.warn('Problème avec la capture vidéo:', data.message);
                 }
             })
             .catch(error => {
@@ -102,11 +169,24 @@ const VideoFeed = {
     },
     
     /**
+     * Rafraîchit manuellement l'image vidéo 
+     */
+    refreshImage: function() {
+        const videoFeedContainer = document.getElementById('video-feed');
+        if (!videoFeedContainer) return;
+        
+        const videoImg = videoFeedContainer.querySelector('.video-image');
+        if (videoImg) {
+            videoImg.src = `/api/video-snapshot?t=${Date.now()}`;
+        }
+    },
+    
+    /**
      * Arrête le flux vidéo et nettoie les ressources
      */
     stop: function() {
         if (this.state.videoSnapshot) {
-            clearInterval(this.state.videoSnapshot);
+            cancelAnimationFrame(this.state.videoSnapshot);
             this.state.videoSnapshot = null;
         }
         
