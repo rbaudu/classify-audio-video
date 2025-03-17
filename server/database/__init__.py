@@ -1,1 +1,4 @@
-# Fichier d'initialisation du package database
+# -*- coding: utf-8 -*-
+"""
+Module de gestion de la base de données
+"""

@@ -1,135 +1,134 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Client pour les services externes
+"""
 
 import logging
 import json
+import time
 import requests
-from datetime import datetime
-
-# Import de la configuration
-from server import EXTERNAL_SERVICE_URL, EXTERNAL_SERVICE_API_KEY
+from requests.exceptions import RequestException
 
 logger = logging.getLogger(__name__)
 
 class ExternalServiceClient:
-    """
-    Client pour interagir avec un service externe via HTTP.
-    Responsable d'envoyer les résultats de classification d'activité.
-    """
+    """Client pour les services externes"""
     
-    def __init__(self, service_url=None, api_key=None, timeout=10):
-        """
-        Initialise le client de service externe.
+    def __init__(self, url, timeout=5, retry_count=3, retry_delay=1):
+        """Initialise le client de service externe
         
         Args:
-            service_url (str, optional): URL du service externe. Si None, utilise la valeur de la configuration.
-            api_key (str, optional): Clé API pour l'authentification. Si None, utilise la valeur de la configuration.
-            timeout (int, optional): Timeout pour les requêtes HTTP en secondes
+            url (str): URL du service externe
+            timeout (int, optional): Délai d'attente en secondes. Par défaut 5.
+            retry_count (int, optional): Nombre de tentatives. Par défaut 3.
+            retry_delay (int, optional): Délai entre les tentatives en secondes. Par défaut 1.
         """
-        self.service_url = service_url or EXTERNAL_SERVICE_URL
-        self.api_key = api_key or EXTERNAL_SERVICE_API_KEY
+        self.url = url
         self.timeout = timeout
+        self.retry_count = retry_count
+        self.retry_delay = retry_delay
         
-        logger.info(f"Client de service externe initialisé avec l'URL {self.service_url}")
+        logger.info(f"Client de service externe initialisé avec l'URL {url}")
     
-    def send_activity(self, activity_data):
-        """
-        Envoie les données d'activité au service externe.
+    def send_activity(self, activity):
+        """Envoie une activité au service externe
         
         Args:
-            activity_data (dict): Données d'activité complètes
-            
-        Returns:
-            bool: True si l'envoi a réussi, False sinon
-        """
-        if not activity_data:
-            logger.warning("Pas de données d'activité à envoyer")
-            return False
+            activity (dict): Activité à envoyer
         
-        try:
-            # Extraire les infos essentielles de activity_data
-            timestamp = activity_data.get('timestamp')
-            activity = activity_data.get('activity')
-            
-            if not timestamp or not activity:
-                logger.warning("Données d'activité incomplètes")
-                return False
-            
-            # Préparation des données à envoyer
-            payload = {
-                'timestamp': timestamp,
-                'date_time': datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S'),
-                'activity': activity,
-                'metadata': activity_data.get('features', {})
-            }
-            
-            # Préparation des headers
-            headers = {
-                'Content-Type': 'application/json'
-            }
-            
-            # Ajout de la clé API si présente
-            if self.api_key:
-                headers['Authorization'] = f'Bearer {self.api_key}'
-            
-            # Envoi de la requête POST
-            response = requests.post(
-                self.service_url,
-                data=json.dumps(payload),
-                headers=headers,
-                timeout=self.timeout
-            )
-            
-            # Vérification de la réponse
-            if response.status_code == 200:
-                logger.info(f"Activité '{activity}' envoyée avec succès au service externe")
-                return True
-            else:
-                logger.warning(f"Erreur lors de l'envoi de l'activité au service externe: {response.status_code} - {response.text}")
-                return False
+        Returns:
+            dict: Réponse du service externe, ou None si erreur
+        """
+        for attempt in range(self.retry_count):
+            try:
+                logger.info(f"Envoi de l'activité {activity.get('type')} au service externe")
                 
-        except requests.RequestException as e:
-            logger.error(f"Erreur de connexion au service externe: {str(e)}")
-            return False
-        except Exception as e:
-            logger.error(f"Erreur inattendue lors de l'envoi de l'activité: {str(e)}")
-            return False
+                response = requests.post(
+                    self.url,
+                    json=activity,
+                    timeout=self.timeout,
+                    headers={'Content-Type': 'application/json'}
+                )
+                
+                response.raise_for_status()
+                
+                result = response.json()
+                logger.info(f"Activité envoyée avec succès, réponse: {result}")
+                
+                return result
+            
+            except RequestException as e:
+                logger.warning(f"Tentative {attempt + 1}/{self.retry_count} échouée: {str(e)}")
+                
+                if attempt < self.retry_count - 1:
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error(f"Échec de l'envoi de l'activité après {self.retry_count} tentatives")
+                    return None
     
-    def get_status(self):
-        """
-        Vérifie le statut du service externe.
+    def get_activities(self, start_time=None, end_time=None, limit=100):
+        """Récupère les activités depuis le service externe
+        
+        Args:
+            start_time (int, optional): Timestamp de début. Par défaut None.
+            end_time (int, optional): Timestamp de fin. Par défaut None.
+            limit (int, optional): Nombre maximal d'activités. Par défaut 100.
         
         Returns:
-            dict: Statut du service ou None en cas d'erreur
+            list: Liste des activités, ou None si erreur
+        """
+        params = {}
+        
+        if start_time:
+            params['start'] = start_time
+        
+        if end_time:
+            params['end'] = end_time
+        
+        if limit:
+            params['limit'] = limit
+        
+        for attempt in range(self.retry_count):
+            try:
+                logger.info(f"Récupération des activités depuis le service externe")
+                
+                response = requests.get(
+                    self.url,
+                    params=params,
+                    timeout=self.timeout
+                )
+                
+                response.raise_for_status()
+                
+                result = response.json()
+                activities = result.get('activities', [])
+                
+                logger.info(f"Récupération de {len(activities)} activités réussie")
+                
+                return activities
+            
+            except RequestException as e:
+                logger.warning(f"Tentative {attempt + 1}/{self.retry_count} échouée: {str(e)}")
+                
+                if attempt < self.retry_count - 1:
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error(f"Échec de la récupération des activités après {self.retry_count} tentatives")
+                    return None
+    
+    def ping(self):
+        """Vérifie la disponibilité du service externe
+        
+        Returns:
+            bool: True si le service est disponible, False sinon
         """
         try:
-            # Construction de l'URL de status
-            status_url = f"{self.service_url.rstrip('/')}/status"
-            
-            # Préparation des headers
-            headers = {}
-            if self.api_key:
-                headers['Authorization'] = f'Bearer {self.api_key}'
-            
-            # Envoi de la requête GET
             response = requests.get(
-                status_url,
-                headers=headers,
+                f"{self.url}/ping",
                 timeout=self.timeout
             )
             
-            # Vérification de la réponse
-            if response.status_code == 200:
-                status_data = response.json()
-                logger.info(f"Statut du service externe récupéré: {status_data}")
-                return status_data
-            else:
-                logger.warning(f"Erreur lors de la récupération du statut: {response.status_code} - {response.text}")
-                return None
-                
-        except requests.RequestException as e:
-            logger.error(f"Erreur de connexion lors de la vérification du statut: {str(e)}")
-            return None
-        except Exception as e:
-            logger.error(f"Erreur inattendue lors de la vérification du statut: {str(e)}")
-            return None
+            return response.status_code == 200
+        
+        except RequestException:
+            return False

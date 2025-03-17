@@ -1,427 +1,326 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Classificateur d'activités basé sur l'audio et la vidéo
+"""
 
 import logging
-import numpy as np
-import os
 import time
 import threading
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-import cv2
-
-# Import de la configuration
-from server import ACTIVITY_CLASSES, MODEL_PATH
+import json
+import os
+import numpy as np
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 class ActivityClassifier:
-    """
-    Classe pour la classification de l'activité basée sur l'analyse des flux audio et vidéo.
-    Utilise un modèle de deep learning pour identifier l'activité parmi les catégories prédéfinies.
-    """
+    """Classificateur d'activités basé sur l'analyse audio et vidéo"""
     
-    def __init__(self, capture_manager=None, stream_processor=None, db_manager=None, model_path=None):
-        """
-        Initialise le classificateur d'activité.
+    def __init__(self, sync_manager, model_path=None, min_confidence=0.6, analysis_interval=60):
+        """Initialise le classificateur d'activités
         
         Args:
-            capture_manager: Instance de SyncManager pour capturer les données audio/vidéo synchronisées
-            stream_processor: Instance de StreamProcessor pour traiter les données
-            db_manager: Instance de DBManager pour accéder à la base de données
-            model_path (str, optional): Chemin vers le modèle de classification pré-entraîné.
-                Si None, utilise le chemin défini dans la configuration ou un modèle de règles prédéfinies simple.
+            sync_manager (SyncManager): Gestionnaire de synchronisation.
+            model_path (str, optional): Chemin vers le modèle ML. Par défaut None (règles).
+            min_confidence (float, optional): Confiance minimale pour les prédictions. Par défaut 0.6.
+            analysis_interval (int, optional): Intervalle entre les analyses (secondes). Par défaut 60.
         """
-        self.capture_manager = capture_manager
-        self.stream_processor = stream_processor
-        self.db_manager = db_manager
-        self.analysis_thread = None
-        self.stop_analysis = False
-        self.last_activity = None
-        self.last_activity_time = 0
+        self.sync_manager = sync_manager
+        self.model_path = model_path
+        self.min_confidence = min_confidence
+        self.analysis_interval = analysis_interval
         
-        # Utiliser le model_path passé ou celui de la configuration
-        self.model_path = model_path or MODEL_PATH
+        # Charger le modèle ML s'il existe
         self.model = None
-        self.rule_based = False
+        self._load_model()
         
-        # Liste des catégories d'activité
-        self.activity_classes = ACTIVITY_CLASSES
+        # État de l'analyse
+        self.is_analyzing = False
+        self.analysis_thread = None
+        self.last_activity = None
+        self.last_analysis_time = 0
         
-        # Chargement du modèle s'il est spécifié
+        # Verrou pour les données d'activité
+        self.activity_lock = threading.Lock()
+    
+    def _load_model(self):
+        """Charge le modèle de ML si disponible"""
         if self.model_path and os.path.exists(self.model_path):
             try:
-                self.model = load_model(self.model_path)
-                logger.info(f"Modèle de classification chargé depuis {self.model_path}")
+                # Ici, nous pourrions charger un modèle ML (TensorFlow, scikit-learn, etc.)
+                # Pour cette implémentation, nous utiliserons un classificateur basé sur des règles
+                logger.info(f"Chargement du modèle depuis {self.model_path}")
+                
+                # Placeholder pour le chargement du modèle
+                self.model = "rule_based"  # À remplacer par le chargement réel du modèle
+                
             except Exception as e:
                 logger.error(f"Erreur lors du chargement du modèle: {str(e)}")
-                self.rule_based = True
-                logger.info("Utilisation du classificateur basé sur des règles prédéfinies")
+                self.model = None
         else:
-            self.rule_based = True
             logger.info("Modèle non spécifié ou introuvable. Utilisation du classificateur basé sur des règles prédéfinies")
+            self.model = None
     
-    def analyze_current_activity(self):
-        """
-        Capture et analyse l'activité courante
+    def start_analysis_loop(self):
+        """Démarre la boucle d'analyse périodique"""
+        if self.is_analyzing:
+            return
         
-        Returns:
-            dict: Résultat de la classification ou None en cas d'erreur
-        """
-        try:
-            # Vérifier si les dépendances sont disponibles
-            if self.capture_manager is None:
-                logger.warning("Gestionnaire de capture non disponible")
-                # Simuler des caractéristiques pour les tests ou utiliser la dernière activité connue
-                if self.last_activity and time.time() - self.last_activity_time < 60:  # Valide pendant 1 minute
-                    logger.info("Utilisation de la dernière activité connue (pas de capture disponible)")
-                    return self.last_activity
-                
-                # Simuler des caractéristiques pour les tests
-                video_features = {
-                    'features': {
-                        'motion_percent': 5,
-                        'skin_percent': 20,
-                        'hsv_means': (100, 50, 150)
-                    }
-                }
-                
-                audio_features = {
-                    'features': {
-                        'rms_level': 0.3,
-                        'zero_crossing_rate': 0.06,
-                        'dominant_frequency': 220,
-                        'mid_freq_ratio': 0.45
-                    }
-                }
-                
-                # Classifier l'activité
-                result = self.classify_activity(video_features, audio_features)
-                self.last_activity = result
-                self.last_activity_time = time.time()
-                return result
-            
-            # Récupérer les données synchronisées
-            sync_data = self.capture_manager.get_synchronized_data()
-            
-            if sync_data is None:
-                logger.warning("Impossible de récupérer les données synchronisées")
-                # Utiliser la dernière activité connue comme fallback
-                if self.last_activity and time.time() - self.last_activity_time < 60:  # Valide pendant 1 minute
-                    logger.info("Utilisation de la dernière activité connue (échec de synchronisation)")
-                    return self.last_activity
-                return None
-            
-            # Utiliser les données vidéo et audio déjà traitées
-            video_features = sync_data.get('video', {}).get('processed')
-            audio_features = sync_data.get('audio', {}).get('processed')
-            
-            if video_features is None and audio_features is None:
-                logger.warning("Données vidéo et audio traitées manquantes")
-                # Utiliser la dernière activité connue comme fallback
-                if self.last_activity and time.time() - self.last_activity_time < 60:
-                    logger.info("Utilisation de la dernière activité connue (pas de données)")
-                    return self.last_activity
-                return None
-            
-            # Si l'une des caractéristiques est manquante, générer des valeurs par défaut
-            if video_features is None:
-                logger.warning("Données vidéo manquantes, utilisation de valeurs par défaut")
-                video_features = {
-                    'features': {
-                        'motion_percent': 5,
-                        'skin_percent': 0,
-                        'hsv_means': (0, 0, 0)
-                    }
-                }
-            
-            if audio_features is None:
-                logger.warning("Données audio manquantes, utilisation de valeurs par défaut")
-                audio_features = {
-                    'features': {
-                        'rms_level': 0.1,
-                        'zero_crossing_rate': 0.01,
-                        'dominant_frequency': 0,
-                        'mid_freq_ratio': 0.3
-                    }
-                }
-            
-            # Classifier l'activité
-            result = self.classify_activity(video_features, audio_features)
-            
-            # Sauvegarder comme dernière activité connue
-            if result:
-                self.last_activity = result
-                self.last_activity_time = time.time()
-            
-            return result
-        except Exception as e:
-            logger.error(f"Erreur lors de l'analyse de l'activité courante: {str(e)}")
-            # Utiliser la dernière activité connue comme fallback en cas d'erreur
-            if self.last_activity and time.time() - self.last_activity_time < 60:
-                logger.info("Utilisation de la dernière activité connue (suite à une erreur)")
-                return self.last_activity
-            return None
-    
-    def start_periodic_analysis(self, sync_manager=None, interval=300):
-        """
-        Démarre l'analyse périodique en arrière-plan
+        # Démarrer le thread d'analyse
+        self.is_analyzing = True
+        logger.info(f"SyncManager fourni pour l'analyse périodique: {self.sync_manager}")
         
-        Args:
-            sync_manager: Gestionnaire de synchronisation (si non fourni au constructeur)
-            interval: Intervalle entre les analyses (en secondes)
-        """
-        if sync_manager is not None:
-            self.capture_manager = sync_manager
-            logger.info(f"SyncManager fourni pour l'analyse périodique: {sync_manager}")
-        
-        # Arrêter l'analyse en cours si elle existe
-        self.stop_analysis = True
-        if self.analysis_thread and self.analysis_thread.is_alive():
-            self.analysis_thread.join(timeout=1.0)
-        
-        # Réinitialiser et démarrer un nouveau thread
-        self.stop_analysis = False
         self.analysis_thread = threading.Thread(
             target=self._analysis_loop,
-            args=(interval,),
             daemon=True
         )
         self.analysis_thread.start()
         
-        logger.info(f"Boucle d'analyse démarrée avec intervalle de {interval} secondes")
-    
-    def _analysis_loop(self, interval):
-        """
-        Boucle d'analyse périodique
-        
-        Args:
-            interval: Intervalle entre les analyses (en secondes)
-        """
         logger.info("Démarrage de la boucle d'analyse périodique")
-        
-        while not self.stop_analysis:
+        logger.info(f"Boucle d'analyse démarrée avec intervalle de {self.analysis_interval} secondes")
+    
+    def _analysis_loop(self):
+        """Boucle d'analyse périodique"""
+        while self.is_analyzing:
             try:
-                # Analyser l'activité actuelle
-                result = self.analyze_current_activity()
+                # Effectuer une analyse
+                self.analyze_current_activity()
                 
-                if result:
-                    # Sauvegarder dans la base de données si disponible
-                    if self.db_manager:
-                        self.db_manager.save_activity(
-                            activity=result['activity'],
-                            confidence=result['confidence'],
-                            metadata=result['features']
-                        )
-                    
-                    logger.info(f"Activité détectée: {result['activity']} (confiance: {result['confidence']:.2f})")
-                else:
-                    logger.warning("Aucune activité détectée lors de cette analyse")
-                
-                # Attendre l'intervalle spécifié, mais en vérifiant régulièrement 
-                # pour permettre un arrêt plus rapide
-                for _ in range(min(interval, 300)):  # Max 5 minutes
-                    if self.stop_analysis:
-                        break
-                    time.sleep(1)
-                    
+                # Attendre avant la prochaine analyse
+                time.sleep(self.analysis_interval)
+            
             except Exception as e:
                 logger.error(f"Erreur dans la boucle d'analyse: {str(e)}")
-                time.sleep(10)  # Attendre un peu avant de réessayer en cas d'erreur
+                time.sleep(5)  # Courte pause en cas d'erreur
     
-    def stop_periodic_analysis(self):
-        """
-        Arrête l'analyse périodique
-        """
-        self.stop_analysis = True
-        if self.analysis_thread and self.analysis_thread.is_alive():
-            self.analysis_thread.join(timeout=2.0)
-            logger.info("Analyse périodique arrêtée")
-    
-    def classify_activity(self, video_features, audio_features):
-        """
-        Classifie l'activité à partir des caractéristiques vidéo et audio
+    def stop_analysis_loop(self):
+        """Arrête la boucle d'analyse périodique"""
+        self.is_analyzing = False
         
-        Args:
-            video_features (dict): Caractéristiques vidéo extraites
-            audio_features (dict): Caractéristiques audio extraites
-            
+        if self.analysis_thread:
+            self.analysis_thread.join(timeout=1.0)
+            self.analysis_thread = None
+        
+        logger.info("Boucle d'analyse arrêtée")
+    
+    def analyze_current_activity(self):
+        """Analyse l'activité actuelle et met à jour l'état
+        
         Returns:
-            dict: Résultat de la classification
+            dict: Activité détectée, ou None si aucune activité
         """
-        if video_features is None and audio_features is None:
-            logger.warning("Caractéristiques vidéo et audio manquantes")
+        # Récupérer les données synchronisées
+        video_frame, audio_data, timestamp = self.sync_manager.get_sync_data()
+        
+        if video_frame is None or audio_data is None:
+            logger.warning("Impossible de récupérer les données synchronisées")
             return None
         
-        try:
-            # S'assurer que les caractéristiques ont la bonne structure
-            if not isinstance(video_features, dict):
-                video_features = {'features': {}}
-            if 'features' not in video_features:
-                video_features['features'] = {}
-            
-            if not isinstance(audio_features, dict):
-                audio_features = {'features': {}}
-            if 'features' not in audio_features:
-                audio_features['features'] = {}
-            
-            # Détermination de l'activité
-            if self.rule_based:
-                activity = self._rule_based_classification(video_features, audio_features)
-                confidence = 0.7  # Confiance fixe pour la méthode basée sur les règles
-                confidence_scores = {cls: 0.1 for cls in self.activity_classes}
-                confidence_scores[activity] = confidence
-            else:
-                activity, confidence, confidence_scores = self._model_based_classification(video_features, audio_features)
-            
-            # Résultat sous forme de dictionnaire
-            result = {
-                'activity': activity,
-                'confidence': confidence,
-                'confidence_scores': confidence_scores,
-                'timestamp': int(time.time()),
-                'features': {
-                    'video': video_features.get('features', {}),
-                    'audio': audio_features.get('features', {})
-                }
-            }
-            
-            return result
-        except Exception as e:
-            logger.error(f"Erreur lors de la classification: {str(e)}")
-            # Mode de secours minimal
-            return {
-                'activity': 'inactif',
-                'confidence': 0.5,
-                'confidence_scores': {cls: 0.1 for cls in self.activity_classes},
-                'timestamp': int(time.time()),
-                'features': {}
-            }
-    
-    def _rule_based_classification(self, video_data, audio_data):
-        """
-        Classification basée sur des règles prédéfinies simples.
-        Utilisée comme solution de repli si le modèle de deep learning n'est pas disponible.
-        
-        Args:
-            video_data (dict): Données vidéo traitées
-            audio_data (dict): Données audio traitées
-            
-        Returns:
-            str: Catégorie d'activité détectée
-        """
         # Extraire les caractéristiques
-        video_features = video_data.get('features', {})
-        audio_features = audio_data.get('features', {})
+        video_features = self._extract_video_features(video_frame)
+        audio_features = self._extract_audio_features(audio_data)
         
-        # Niveau de mouvement
-        motion_percent = video_features.get('motion_percent', 0)
+        # Classifier l'activité
+        activity = self._classify_activity(video_features, audio_features)
         
-        # Niveau sonore
-        audio_level = audio_features.get('rms_level', 0)
-        
-        # Caractéristiques de parole
-        zcr = audio_features.get('zero_crossing_rate', 0)
-        mid_freq_ratio = audio_features.get('mid_freq_ratio', 0)
-        
-        # Détection de visage/personne (simplifiée)
-        skin_percent = video_features.get('skin_percent', 0)
-        
-        # Logique de classification basée sur des heuristiques
-        
-        # 1. "endormi" - très peu de mouvement, peu ou pas de son
-        if motion_percent < 2 and audio_level < 0.1:
-            return 'endormi'
-        
-        # 2. "à table" - mouvement modéré, posture assise (proxy simplifié)
-        hsv_means = video_features.get('hsv_means', (0, 0, 0))
-        # Des surfaces horizontales comme une table pourraient avoir des caractéristiques spécifiques
-        # Ce proxy est très simplifié et devrait être amélioré
-        if 5 < motion_percent < 15 and hsv_means[2] > 100:  # Valeur de luminosité plus élevée
-            return 'à table'
-        
-        # 3. "lisant" - peu de mouvement, position statique, orientation de la tête baissée
-        # Difficile à détecter avec des règles simples, mais on peut faire une approximation
-        if 2 < motion_percent < 10 and audio_level < 0.2:
-            return 'lisant'
-        
-        # 4. "au téléphone" - profil spécifique de parole, posture caractéristique
-        # Marqué par la parole avec peu de mouvement
-        if audio_level > 0.3 and zcr > 0.05 and mid_freq_ratio > 0.4 and motion_percent < 10:
-            return 'au téléphone'
-        
-        # 5. "en conversation" - parole active, plus de mouvement que "au téléphone"
-        if audio_level > 0.25 and zcr > 0.05 and mid_freq_ratio > 0.4 and motion_percent > 10:
-            return 'en conversation'
-        
-        # 6. "occupé" - beaucoup de mouvement mais pas nécessairement de la parole
-        if motion_percent > 20:
-            return 'occupé'
-        
-        # 7. "inactif" - peu de mouvement, peu de son, cas par défaut
-        return 'inactif'
+        if activity:
+            # Mettre à jour l'activité détectée
+            with self.activity_lock:
+                self.last_activity = activity
+                self.last_analysis_time = time.time()
+            
+            return activity
+        else:
+            logger.warning("Aucune activité détectée lors de cette analyse")
+            return None
     
-    def _model_based_classification(self, video_data, audio_data):
-        """
-        Classification basée sur le modèle de deep learning.
+    def _extract_video_features(self, video_frame):
+        """Extrait des caractéristiques vidéo pour la classification
         
         Args:
-            video_data (dict): Données vidéo traitées
-            audio_data (dict): Données audio traitées
-            
+            video_frame (PIL.Image.Image): Image à analyser
+        
         Returns:
-            tuple: (activité détectée, niveau de confiance, scores pour toutes les classes)
+            dict: Caractéristiques extraites
         """
-        # Préparation des données pour le modèle
-        video_frame = video_data.get('processed_frame')
-        
-        # Extraction et préparation des caractéristiques audio importantes
-        audio_features = []
-        for feature in ['rms_level', 'zero_crossing_rate', 'dominant_frequency',
-                       'low_freq_ratio', 'mid_freq_ratio', 'high_freq_ratio']:
-            value = audio_data.get('features', {}).get(feature, 0)
-            audio_features.append(value)
-        
-        # Normalisation des caractéristiques audio (exemple simplifié)
-        audio_features = np.array(audio_features, dtype=np.float32)
-        
-        # Préparation de l'image (ajout de la dimension de batch)
-        input_image = np.expand_dims(video_frame, axis=0) if video_frame is not None else None
-        
-        # Ajout de la dimension de batch pour l'audio
-        audio_features = np.expand_dims(audio_features, axis=0)
+        if video_frame is None:
+            return {}
         
         try:
-            # Vérifier si le modèle et les entrées sont valides
-            if self.model is None or input_image is None:
-                raise ValueError("Modèle ou données d'entrée non disponibles")
+            # Convertir en niveaux de gris
+            gray_frame = video_frame.convert("L")
             
-            # Prédiction avec le modèle
-            predictions = self.model.predict([input_image, audio_features])
+            # Convertir en tableau numpy
+            frame_array = np.array(gray_frame)
             
-            # Obtention de la classe prédite
-            predicted_class_idx = np.argmax(predictions[0])
-            confidence = float(predictions[0][predicted_class_idx])
+            # Calculer des statistiques de base
+            mean_intensity = np.mean(frame_array)
+            std_intensity = np.std(frame_array)
+            min_intensity = np.min(frame_array)
+            max_intensity = np.max(frame_array)
             
-            # Vérification que l'index est valide
-            if 0 <= predicted_class_idx < len(self.activity_classes):
-                activity = self.activity_classes[predicted_class_idx]
-            else:
-                logger.warning(f"Index de classe prédit invalide: {predicted_class_idx}")
-                activity = 'inactif'
-                confidence = 0.5
+            # Calculer l'histogramme (10 bins)
+            hist, _ = np.histogram(frame_array, bins=10, range=(0, 255))
+            hist = hist / np.sum(hist)  # Normaliser
             
-            # Conversion des scores en dictionnaire
-            all_scores = {self.activity_classes[i]: float(score) for i, score in enumerate(predictions[0]) if i < len(self.activity_classes)}
+            # Assembler les caractéristiques
+            features = {
+                "mean_intensity": float(mean_intensity),
+                "std_intensity": float(std_intensity),
+                "min_intensity": float(min_intensity),
+                "max_intensity": float(max_intensity),
+                "histogram": hist.tolist()
+            }
             
-            return activity, confidence, all_scores
-            
+            return features
+        
         except Exception as e:
-            logger.error(f"Erreur lors de la classification par modèle: {str(e)}")
-            # Fallback sur la méthode basée sur des règles
-            activity = self._rule_based_classification(video_data, audio_data)
-            confidence = 0.5  # Confiance réduite puisque c'est une solution de repli
-            all_scores = {cls: 0.1 for cls in self.activity_classes}
-            all_scores[activity] = confidence
+            logger.error(f"Erreur lors de l'extraction de caractéristiques vidéo: {str(e)}")
+            return {}
+    
+    def _extract_audio_features(self, audio_data):
+        """Extrait des caractéristiques audio pour la classification
+        
+        Args:
+            audio_data (numpy.ndarray): Données audio à analyser
+        
+        Returns:
+            dict: Caractéristiques extraites
+        """
+        if audio_data is None or len(audio_data) == 0:
+            return {}
+        
+        try:
+            # Calculer des statistiques de base
+            mean_amplitude = np.mean(audio_data)
+            std_amplitude = np.std(audio_data)
+            max_amplitude = np.max(np.abs(audio_data))
             
-            return activity, confidence, all_scores
+            # Calculer l'énergie du signal
+            energy = np.sum(audio_data ** 2) / len(audio_data)
+            
+            # Calculer les taux de passage à zéro (zero-crossing rate)
+            zero_crossings = np.sum(np.abs(np.diff(np.signbit(audio_data)))) / len(audio_data)
+            
+            # Assembler les caractéristiques
+            features = {
+                "mean_amplitude": float(mean_amplitude),
+                "std_amplitude": float(std_amplitude),
+                "max_amplitude": float(max_amplitude),
+                "energy": float(energy),
+                "zero_crossing_rate": float(zero_crossings)
+            }
+            
+            return features
+        
+        except Exception as e:
+            logger.error(f"Erreur lors de l'extraction de caractéristiques audio: {str(e)}")
+            return {}
+    
+    def _classify_activity(self, video_features, audio_features):
+        """Classifie l'activité en fonction des caractéristiques extraites
+        
+        Args:
+            video_features (dict): Caractéristiques vidéo
+            audio_features (dict): Caractéristiques audio
+        
+        Returns:
+            dict: Activité détectée avec confiance
+        """
+        if not video_features and not audio_features:
+            return None
+        
+        # Si nous avons un modèle ML, l'utiliser
+        if self.model and self.model != "rule_based":
+            # Placeholder pour l'utilisation d'un modèle ML
+            # prédiction = self.model.predict([video_features, audio_features])
+            # return {"type": prédiction[0], "confidence": prédiction[1]}
+            pass
+        
+        # Sinon, utiliser un classificateur basé sur des règles
+        return self._rule_based_classification(video_features, audio_features)
+    
+    def _rule_based_classification(self, video_features, audio_features):
+        """Classification basée sur des règles prédéfinies
+        
+        Args:
+            video_features (dict): Caractéristiques vidéo
+            audio_features (dict): Caractéristiques audio
+        
+        Returns:
+            dict: Activité détectée avec confiance
+        """
+        # Valeurs par défaut
+        activity_type = "inactif"
+        confidence = 0.6
+        
+        # Si pas de caractéristiques, retourner inactif
+        if not video_features and not audio_features:
+            return {
+                "type": activity_type,
+                "confidence": confidence,
+                "timestamp": int(time.time()),
+                "duration": 0
+            }
+        
+        # Règles basées sur l'audio (prioritaires si fort niveau sonore)
+        if audio_features and audio_features.get("energy", 0) > 0.1:
+            if audio_features.get("zero_crossing_rate", 0) > 0.2:
+                # Beaucoup de passages à zéro suggère la parole
+                activity_type = "visioconférence"
+                confidence = min(0.7 + audio_features.get("energy", 0), 0.95)
+            else:
+                # Son fort avec peu de passages à zéro suggère de la musique ou vidéo
+                activity_type = "vidéo"
+                confidence = min(0.65 + audio_features.get("energy", 0), 0.9)
+        
+        # Règles basées sur la vidéo
+        elif video_features:
+            std_intensity = video_features.get("std_intensity", 0)
+            mean_intensity = video_features.get("mean_intensity", 0)
+            
+            if std_intensity < 20:
+                # Peu de variation suggère une image statique
+                if mean_intensity < 100:
+                    # Image sombre suggère l'inactivité
+                    activity_type = "inactif"
+                    confidence = 0.8
+                else:
+                    # Image claire mais statique suggère la lecture
+                    activity_type = "lecture"
+                    confidence = 0.7
+            elif std_intensity > 50:
+                # Beaucoup de variation suggère une vidéo
+                activity_type = "vidéo"
+                confidence = 0.75
+            else:
+                # Variation modérée suggère une navigation web
+                activity_type = "navigation_web"
+                confidence = 0.65
+        
+        # Règles de combinaison audio/vidéo pour affiner la classification
+        if video_features and audio_features:
+            video_std = video_features.get("std_intensity", 0)
+            audio_energy = audio_features.get("energy", 0)
+            
+            if video_std > 30 and audio_energy > 0.05:
+                # Variation vidéo et son suggère une visioconférence ou vidéo
+                activity_type = "visioconférence"
+                confidence = 0.85
+        
+        # Retourner l'activité détectée
+        return {
+            "type": activity_type,
+            "confidence": confidence,
+            "timestamp": int(time.time()),
+            "duration": 0
+        }
+    
+    def get_current_activity(self):
+        """Récupère l'activité courante
+        
+        Returns:
+            dict: Activité courante, ou None si aucune activité
+        """
+        with self.activity_lock:
+            return self.last_activity

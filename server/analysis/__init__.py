@@ -1,1 +1,4 @@
-# Fichier d'initialisation du package analysis
+# -*- coding: utf-8 -*-
+"""
+Module d'analyse et de classification d'activités
+"""

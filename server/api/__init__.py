@@ -1,1 +1,4 @@
-# Fichier d'initialisation du package api
+# -*- coding: utf-8 -*-
+"""
+Module d'API et services externes
+"""

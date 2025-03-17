@@ -1,252 +1,262 @@
+# -*- coding: utf-8 -*-
+"""
+Module de capture vidéo via OBS WebSocket
+"""
+
 import logging
 import time
-import threading
-from obswebsocket import obsws, requests, events
-import cv2
-import numpy as np
 import base64
-from io import BytesIO
+import io
 from PIL import Image
-import random
+import threading
+import obsws_python as obsws
+from obsws_python.error import OBSSDKError
 
-# Import de la configuration
-from server import OBS_HOST, OBS_PORT, OBS_PASSWORD, VIDEO_SOURCE_NAME
-from server import OBS_RECONNECT_INTERVAL, OBS_MAX_RECONNECT_INTERVAL, OBS_MAX_RECONNECT_ATTEMPTS
+logger = logging.getLogger(__name__)
 
-# Import des mixins OBS
-from server.capture.obs_sources import OBSSourcesMixin
-from server.capture.obs_events import OBSEventsMixin
-from server.capture.obs_media import OBSMediaMixin
-
-class OBSCapture(OBSSourcesMixin, OBSEventsMixin, OBSMediaMixin):
-    """
-    Classe pour capturer les flux vidéo depuis OBS Studio via le plugin websocket.
-    Cette classe centralise plusieurs fonctionnalités réparties dans des mixins.
-    """
+class OBSCapture:
+    """Classe pour capturer des vidéos depuis OBS via WebSocket"""
     
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.ws = None
+    def __init__(self, host="localhost", port=4455, password=None):
+        """Initialise la connexion à OBS WebSocket
+        
+        Args:
+            host (str, optional): Hôte OBS WebSocket. Par défaut "localhost".
+            port (int, optional): Port OBS WebSocket. Par défaut 4455.
+            password (str, optional): Mot de passe OBS WebSocket. Par défaut None.
+        """
+        self.host = host
+        self.port = port
+        self.password = password
+        self.client = None
         self.connected = False
-        self.current_source = None
         self.video_sources = []
         self.media_sources = []
         self.current_frame = None
-        self.reconnect_thread = None
+        self.frame_lock = threading.Lock()
+        self.frame_time = 0
+        self.is_capturing = False
+        self.capture_thread = None
         
-        # Paramètres de reconnexion (importés depuis la configuration)
-        self.reconnect_interval = OBS_RECONNECT_INTERVAL
-        self.max_reconnect_interval = OBS_MAX_RECONNECT_INTERVAL
-        self.max_reconnect_attempts = OBS_MAX_RECONNECT_ATTEMPTS
-        
-        self.reconnect_attempts = 0
-        self.should_reconnect = True
-        self.connection_lost_time = None
-        
-        # État des média
-        self.media_states = {}
-        
-        # Mutex pour protéger l'accès au WebSocket
-        self.ws_lock = threading.RLock()
-        
-        # Dernière image réussie (pour la récupération d'erreur)
-        self.last_successful_frame = None
-        
-        # Initialisation des états pour la gestion des erreurs répétées
-        self._initialize_capture_state()
-        self._initialize_media_state()
-        
-        # Tentative de connexion initiale
-        self.connect()
+        # Se connecter à OBS
+        self._connect()
     
-    def connect(self):
-        """
-        Établit une connexion WebSocket avec OBS Studio
-        """
-        with self.ws_lock:
-            if self.connected:
-                return True
-                
-            try:
-                self.logger.info(f"Tentative de connexion à OBS sur {OBS_HOST}:{OBS_PORT}")
-                
-                # Créer l'objet de connexion
-                self.ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
-                
-                # Enregistrer les callbacks pour les événements
-                self.ws.register(self._on_switch_scene, events.SwitchScenes)
-                self.ws.register(self._on_stream_starting, events.StreamStarting)
-                self.ws.register(self._on_stream_stopping, events.StreamStopping)
-                self.ws.register(self._on_media_play, events.MediaStarted)
-                self.ws.register(self._on_media_pause, events.MediaPaused)
-                self.ws.register(self._on_media_stop, events.MediaStopped)
-                self.ws.register(self._on_media_end, events.MediaEnded)
-                self.ws.register(self._on_exit_started, events.ExitStarted)
-                self.ws.register(self._on_connection_closed, events.ConnectionClosed)
-                
-                # Se connecter à OBS
-                self.ws.connect()
-                self.connected = True
-                self.reconnect_attempts = 0
-                self.connection_lost_time = None
-                self.logger.info("Connecté à OBS avec succès")
-                
-                # Récupérer les sources disponibles
-                self._refresh_sources()
-                
-                return True
-            except Exception as e:
-                self.logger.error(f"Erreur lors de la connexion à OBS: {str(e)}")
-                self.connected = False
-                
-                # Enregistrer le moment où la connexion a été perdue
-                if self.connection_lost_time is None:
-                    self.connection_lost_time = time.time()
-                
-                # Lancer un thread pour tenter la reconnexion automatique
-                if not self.reconnect_thread or not self.reconnect_thread.is_alive():
-                    self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-                    self.reconnect_thread.daemon = True
-                    self.reconnect_thread.start()
-                
-                return False
-    
-    def disconnect(self):
-        """
-        Ferme la connexion avec OBS
-        """
-        with self.ws_lock:
-            self.should_reconnect = False
-            if self.ws and self.connected:
-                try:
-                    self.ws.disconnect()
-                    self.logger.info("Déconnecté d'OBS")
-                except Exception as e:
-                    self.logger.error(f"Erreur lors de la déconnexion d'OBS: {str(e)}")
-                finally:
-                    self.connected = False
-                    self.reconnect_attempts = 0
-                    self.connection_lost_time = None
-    
-    def _reconnect_loop(self):
-        """
-        Boucle pour tenter de se reconnecter à OBS à intervalles réguliers
-        """
-        while self.should_reconnect and (self.max_reconnect_attempts == 0 or self.reconnect_attempts < self.max_reconnect_attempts):
-            # Incrémenter le compteur de tentatives
-            self.reconnect_attempts += 1
+    def _connect(self):
+        """Se connecte à OBS WebSocket"""
+        try:
+            logger.info(f"Tentative de connexion à OBS sur {self.host}:{self.port}")
             
-            # Calculer l'intervalle de reconnexion avec un backoff exponentiel
-            if self.reconnect_attempts > 1:
-                # Augmenter l'intervalle de reconnexion avec un peu d'aléatoire pour éviter les tempêtes de reconnexion
-                jitter = random.uniform(0.8, 1.2)
-                current_interval = min(
-                    self.reconnect_interval * (1.5 ** (self.reconnect_attempts - 1)) * jitter,
-                    self.max_reconnect_interval
-                )
+            # Initialiser le client OBS WebSocket
+            if self.password:
+                self.client = obsws.ReqClient(host=self.host, port=self.port, password=self.password)
             else:
-                current_interval = self.reconnect_interval
+                self.client = obsws.ReqClient(host=self.host, port=self.port)
             
-            self.logger.info(f"Tentative de reconnexion {self.reconnect_attempts} à OBS dans {current_interval:.1f} secondes...")
+            # Vérifier la connexion
+            version = self.client.get_version()
+            logger.info(f"Connecté à OBS avec succès")
             
-            # Attendre l'intervalle calculé
-            time.sleep(current_interval)
+            # Récupérer les sources disponibles
+            self._get_sources()
             
-            # Tentative de reconnexion
-            if self.connect():
-                self.logger.info(f"Reconnexion réussie après {self.reconnect_attempts} tentatives")
-                # Durée totale de l'interruption
-                if self.connection_lost_time:
-                    downtime = time.time() - self.connection_lost_time
-                    self.logger.info(f"Durée totale de l'interruption: {downtime:.1f} secondes")
-                    self.connection_lost_time = None
-                break  # Sortir de la boucle si reconnecté avec succès
+            self.connected = True
+        
+        except Exception as e:
+            logger.error(f"Erreur de connexion à OBS: {str(e)}")
+            self.connected = False
     
-    def _is_connection_error(self, error_message):
-        """
-        Détecte si une erreur est liée à une perte de connexion
+    def _get_sources(self):
+        """Récupère les sources disponibles dans OBS"""
+        if not self.connected or not self.client:
+            return
+        
+        # Essayer d'abord avec GetSourcesList (version plus ancienne d'OBS)
+        try:
+            logger.info("Tentative de récupération des sources via GetSourcesList()")
+            sources_response = self.client.call(obsws.requests.GetSourcesList())
+            logger.info(f"Réponse de GetSourcesList(): {sources_response}")
+            
+            sources = sources_response.get('sources', [])
+            
+            # Filtrer les sources vidéo et média
+            self.video_sources = [source['name'] for source in sources if source.get('typeId') in ['dshow_input', 'v4l2_input']]
+            self.media_sources = [source['name'] for source in sources if source.get('typeId') in ['ffmpeg_source', 'vlc_source']]
+            
+            logger.info(f"Sources vidéo trouvées: {self.video_sources}")
+            logger.info(f"Sources média trouvées: {self.media_sources}")
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
+            
+            # Essayer avec GetInputList() pour OBS 28+
+            try:
+                logger.info("Tentative de récupération des sources via GetInputList() (OBS 28+)")
+                inputs_response = self.client.get_input_list()
+                logger.info(f"Sources récupérées via GetInputList(): {inputs_response.inputs}")
+                
+                # Filtrer par type d'entrée pour OBS 28+
+                self.video_sources = [input_data['inputName'] for input_data in inputs_response.inputs if input_data.get('inputKind') in ['dshow_input', 'v4l2_input']]
+                self.media_sources = [input_data['inputName'] for input_data in inputs_response.inputs if input_data.get('inputKind') in ['ffmpeg_source', 'vlc_source']]
+                
+                logger.info(f"Sources vidéo trouvées (via GetInputList): {self.video_sources}")
+                logger.info(f"Sources média trouvées (via GetInputList): {self.media_sources}")
+                
+            except Exception as inner_e:
+                logger.error(f"Erreur lors de la récupération des sources via GetInputList: {str(inner_e)}")
+    
+    def capture_frame(self, source_name=None):
+        """Capture une image d'une source OBS
         
         Args:
-            error_message (str): Message d'erreur à analyser
+            source_name (str, optional): Nom de la source à capturer. Par défaut None (utilise la première source disponible).
         
         Returns:
-            bool: True si c'est une erreur de connexion, False sinon
+            PIL.Image.Image: Image capturée, ou None si échec
         """
-        connection_error_patterns = [
-            "socket is already closed",
-            "not connected",
-            "connection refused",
-            "connection reset",
-            "timed out",
-            "network is unreachable",
-            "connection was closed",
-            "disconnected",
-            "connection error",
-            "failed to connect"
-        ]
+        if not self.connected or not self.client:
+            logger.error("Impossible de capturer une image: non connecté à OBS")
+            return None
         
-        for pattern in connection_error_patterns:
-            if pattern.lower() in error_message.lower():
-                return True
+        # Si aucune source n'est spécifiée, utiliser la première source vidéo
+        if not source_name:
+            if self.video_sources:
+                source_name = self.video_sources[0]
+            else:
+                logger.error("Aucune source vidéo disponible")
+                return None
         
-        return False
-    
-    def _handle_connection_lost(self):
-        """
-        Gère la perte de connexion et initialise la procédure de reconnexion
-        """
-        # Ne pas réinitialiser si déjà déconnecté
-        if not self.connected:
-            return
+        try:
+            # Capture d'écran de la source
+            logger.info(f"Tentative avec GetSourceScreenshot pour: {source_name}")
             
-        self.connected = False
-        
-        # Enregistrer le moment où la connexion a été perdue
-        if self.connection_lost_time is None:
-            self.connection_lost_time = time.time()
-        
-        # Lancer la reconnexion si nécessaire
-        if self.should_reconnect and (not self.reconnect_thread or not self.reconnect_thread.is_alive()):
-            self.reconnect_thread = threading.Thread(target=self._reconnect_loop)
-            self.reconnect_thread.daemon = True
-            self.reconnect_thread.start()
-    
-    def _on_connection_closed(self, event):
-        """
-        Callback pour l'événement de fermeture de connexion
-        """
-        self.logger.warning("Événement de fermeture de connexion reçu")
-        self._handle_connection_lost()
-    
-    def _on_exit_started(self, event):
-        """
-        Callback pour l'événement de fermeture d'OBS
-        """
-        self.logger.warning("Événement de fermeture d'OBS reçu")
-        with self.ws_lock:
-            self.connected = False
-            self.should_reconnect = True  # On veut se reconnecter quand OBS redémarre
+            screenshot = self.client.get_source_screenshot(
+                source_name=source_name,
+                img_format="jpg",
+                width=640,
+                height=480
+            )
             
-            # Enregistrer le moment où la connexion a été perdue
-            if self.connection_lost_time is None:
-                self.connection_lost_time = time.time()
-    
-    def is_connected(self):
-        """
-        Vérifie si la connexion à OBS est active
-        
-        Returns:
-            bool: True si connecté, False sinon
-        """
-        with self.ws_lock:
-            if not self.connected:
-                return False
+            # Décodage de l'image base64
+            if screenshot and hasattr(screenshot, 'img_data'):
+                img_data = screenshot.img_data
                 
+                # Supprimer le préfixe data:image/jpg;base64, si présent
+                if ';base64,' in img_data:
+                    img_data = img_data.split(';base64,')[1]
+                
+                # Décoder l'image base64
+                img_bytes = base64.b64decode(img_data)
+                img = Image.open(io.BytesIO(img_bytes))
+                
+                # Mettre à jour l'image courante
+                with self.frame_lock:
+                    self.current_frame = img
+                    self.frame_time = time.time()
+                
+                return img
+            else:
+                logger.warning(f"Capture d'écran non réussie pour {source_name}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"Erreur lors de la capture d'écran: {str(e)}")
+            
+            # Essayer une méthode alternative pour OBS 28+
             try:
-                # Effectuer un appel simple pour vérifier la connexion
-                self.ws.call(requests.GetVersion())
-                return True
-            except Exception as e:
-                self.logger.warning(f"La connexion à OBS semble interrompue: {str(e)}")
-                self._handle_connection_lost()
-                return False
+                screenshot = self.client.get_source_screenshot(
+                    source_name=source_name,
+                    img_format="jpg",
+                    width=640,
+                    height=480,
+                    compression_quality=75
+                )
+                
+                # Traitement similaire à ci-dessus
+                if screenshot and hasattr(screenshot, 'img_data'):
+                    img_data = screenshot.img_data
+                    
+                    # Supprimer le préfixe data:image/jpg;base64, si présent
+                    if ';base64,' in img_data:
+                        img_data = img_data.split(';base64,')[1]
+                    
+                    # Décoder l'image base64
+                    img_bytes = base64.b64decode(img_data)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    
+                    # Mettre à jour l'image courante
+                    with self.frame_lock:
+                        self.current_frame = img
+                        self.frame_time = time.time()
+                    
+                    return img
+            except Exception as inner_e:
+                logger.error(f"Erreur alternative lors de la capture d'écran: {str(inner_e)}")
+                return None
+    
+    def start_capture(self, source_name=None, interval=0.1):
+        """Démarre la capture continue en arrière-plan
+        
+        Args:
+            source_name (str, optional): Source à capturer. Par défaut None.
+            interval (float, optional): Intervalle entre les captures (secondes). Par défaut 0.1.
+        """
+        if self.is_capturing:
+            logger.warning("Capture déjà en cours")
+            return
+        
+        # Si aucune source n'est spécifiée, utiliser la première source vidéo
+        if not source_name and self.video_sources:
+            source_name = self.video_sources[0]
+        
+        if not source_name:
+            logger.error("Aucune source vidéo disponible pour la capture continue")
+            return
+        
+        self.is_capturing = True
+        
+        # Démarrer le thread de capture
+        self.capture_thread = threading.Thread(
+            target=self._capture_loop,
+            args=(source_name, interval),
+            daemon=True
+        )
+        self.capture_thread.start()
+        
+        logger.info(f"Capture continue démarrée pour {source_name} avec intervalle {interval}s")
+    
+    def _capture_loop(self, source_name, interval):
+        """Boucle de capture continue
+        
+        Args:
+            source_name (str): Source à capturer.
+            interval (float): Intervalle entre les captures (secondes).
+        """
+        while self.is_capturing:
+            self.capture_frame(source_name)
+            time.sleep(interval)
+    
+    def stop_capture(self):
+        """Arrête la capture continue"""
+        self.is_capturing = False
+        
+        if self.capture_thread:
+            self.capture_thread.join(timeout=1.0)
+            self.capture_thread = None
+        
+        logger.info("Capture continue arrêtée")
+    
+    def get_current_frame(self):
+        """Récupère l'image capturée la plus récente
+        
+        Returns:
+            tuple: (PIL.Image.Image, float) Image et timestamp, ou (None, 0) si aucune image
+        """
+        with self.frame_lock:
+            return self.current_frame, self.frame_time
+    
+    def disconnect(self):
+        """Déconnecte du serveur OBS WebSocket"""
+        self.stop_capture()
+        self.connected = False
+        self.client = None
+        logger.info("Déconnecté d'OBS WebSocket")
