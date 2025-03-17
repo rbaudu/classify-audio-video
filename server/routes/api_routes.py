@@ -39,7 +39,26 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
                 result = activity_classifier.analyze_current_activity()
                 
                 if not result:
-                    return jsonify({"error": "Aucune activité détectée"}), 404
+                    # Créer une activité par défaut plutôt que de retourner une erreur
+                    default_activity = {
+                        'activity': 'inactif',
+                        'confidence': 0.5,
+                        'timestamp': int(time.time()),
+                        'features': {
+                            'video': {
+                                'motion_percent': 0.0,
+                                'skin_percent': 0.0,
+                                'hsv_means': (0.0, 0.0, 0.0)
+                            },
+                            'audio': {
+                                'rms_level': 0.0,
+                                'zero_crossing_rate': 0.0,
+                                'dominant_frequency': 0.0,
+                                'mid_freq_ratio': 0.0
+                            }
+                        }
+                    }
+                    return jsonify(default_activity)
                 
                 # Formater pour l'API
                 activity_data = {
@@ -60,7 +79,15 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
             return jsonify(activity_data)
         except Exception as e:
             logger.error(f"Erreur lors de la récupération de l'activité: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            # Retourner une activité par défaut en cas d'erreur plutôt qu'une erreur 500
+            default_activity = {
+                'activity': 'inactif',
+                'confidence': 0.5,
+                'timestamp': int(time.time()),
+                'features': {},
+                'error': str(e)
+            }
+            return jsonify(default_activity)
 
     @app.route('/api/activities', methods=['GET'])
     def get_activities():
@@ -96,7 +123,10 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
             return jsonify(result)
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des activités: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({
+                "error": str(e),
+                "activities": []
+            }), 500
 
     @app.route('/api/statistics', methods=['GET'])
     def get_statistics():
@@ -180,7 +210,12 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
             return jsonify(stats)
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des statistiques: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({
+                "error": str(e),
+                "activity_counts": {},
+                "activity_durations": {},
+                "period": "day"
+            }), 500
 
     @app.route('/api/classify', methods=['POST'])
     def classify():
@@ -201,12 +236,25 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
                 result = activity_classifier.analyze_current_activity()
             
             if not result:
-                return jsonify({"error": "Impossible de classifier l'activité"}), 400
+                # Renvoyer une classification par défaut plutôt qu'une erreur
+                default_result = {
+                    'activity': 'inactif',
+                    'confidence': 0.5,
+                    'timestamp': int(time.time()),
+                    'features': {}
+                }
+                return jsonify(default_result)
             
             return jsonify(result)
         except Exception as e:
             logger.error(f"Erreur lors de la classification: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({
+                'activity': 'inactif',
+                'confidence': 0.5,
+                'timestamp': int(time.time()),
+                'features': {},
+                'error': str(e)
+            })
 
     # Routes API pour les flux vidéo/audio
     @app.route('/api/video-feed-url', methods=['GET'])
@@ -228,7 +276,7 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
             return jsonify(sources)
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des sources média: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": str(e), "sources": []}), 500
 
     @app.route('/api/audio-devices', methods=['GET'])
     def get_audio_devices():
@@ -238,7 +286,7 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
             return jsonify(devices)
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des périphériques audio: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": str(e), "devices": []}), 500
 
     @app.route('/api/set-audio-device', methods=['POST'])
     def set_audio_device():
@@ -341,7 +389,7 @@ def register_api_routes(app, sync_manager, activity_classifier, db_manager, anal
             result = sync_manager.save_synchronized_clip(duration, prefix)
             
             if not result or not result.get('success'):
-                return jsonify({"error": "Impossible de sauvegarder le clip"}), 400
+                return jsonify({"error": "Impossible de sauvegarder le clip", "partial_result": result}), 400
             
             return jsonify(result)
         except Exception as e:
