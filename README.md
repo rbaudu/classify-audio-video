@@ -5,8 +5,15 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 
 ## Nouveautés
 
+### Améliorations de fiabilité (Mars 2025)
+La dernière mise à jour améliore la fiabilité de l'application en adressant deux problèmes majeurs :
+- **Correction de la capture d'images OBS** : Résolution du problème "Erreur lors de la capture d'image: 'img'" grâce à une meilleure gestion des attributs de réponse OBS, avec support pour différentes versions d'OBS
+- **Gestion améliorée de l'arrêt du programme** : Implémentation d'un mécanisme robuste de gestion CTRL+C et arrêt des threads, permettant une terminaison propre et rapide de l'application
+
+Ces améliorations assurent un fonctionnement plus fluide et réduisent les risques de blocage de l'application.
+
 ### Restructuration du code
-La dernière mise à jour apporte une restructuration majeure du code pour améliorer sa lisibilité, sa maintenabilité et son extensibilité. Le code est désormais organisé en modules plus petits et spécialisés, ce qui facilite :
+La mise à jour précédente apporte une restructuration majeure du code pour améliorer sa lisibilité, sa maintenabilité et son extensibilité. Le code est désormais organisé en modules plus petits et spécialisés, ce qui facilite :
 - Le développement et la maintenance de fonctionnalités spécifiques
 - La collaboration entre développeurs
 - L'implémentation de tests unitaires
@@ -61,6 +68,7 @@ Un système robuste de gestion d'erreurs a été implémenté pour améliorer la
 - **Exportation de données** : Export des analyses en formats JSON et CSV
 - **Tests unitaires** : Couverture de test complète pour tous les modules principaux
 - **Gestion d'erreurs robuste** : Système complet pour la détection, le logging et la récupération des erreurs
+- **Arrêt propre et réactif** : Mécanisme fiable pour terminer proprement l'application avec CTRL+C
 
 ## Documentation détaillée
 
