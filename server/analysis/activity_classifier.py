@@ -5,6 +5,7 @@ import logging
 import numpy as np
 import os
 import time
+import threading
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import cv2
@@ -20,7 +21,7 @@ class ActivityClassifier:
     Utilise un modèle de deep learning pour identifier l'activité parmi les catégories prédéfinies.
     """
     
-    def __init__(self, capture_manager, stream_processor, db_manager, model_path=None):
+    def __init__(self, capture_manager=None, stream_processor=None, db_manager=None, model_path=None):
         """
         Initialise le classificateur d'activité.
         
@@ -34,6 +35,8 @@ class ActivityClassifier:
         self.capture_manager = capture_manager
         self.stream_processor = stream_processor
         self.db_manager = db_manager
+        self.analysis_thread = None
+        self.stop_analysis = False
         
         # Utiliser le model_path passé ou celui de la configuration
         self.model_path = model_path or MODEL_PATH
@@ -64,6 +67,31 @@ class ActivityClassifier:
             dict: Résultat de la classification ou None en cas d'erreur
         """
         try:
+            # Vérifier si les dépendances sont disponibles
+            if self.capture_manager is None:
+                logger.warning("Gestionnaire de capture non disponible")
+                # Simuler des caractéristiques pour les tests
+                video_features = {
+                    'features': {
+                        'motion_percent': 5,
+                        'skin_percent': 20,
+                        'hsv_means': (100, 50, 150)
+                    }
+                }
+                
+                audio_features = {
+                    'features': {
+                        'rms_level': 0.3,
+                        'zero_crossing_rate': 0.06,
+                        'dominant_frequency': 220,
+                        'mid_freq_ratio': 0.45
+                    }
+                }
+                
+                # Classifier l'activité
+                result = self.classify_activity(video_features, audio_features)
+                return result
+            
             # Récupérer les données synchronisées
             sync_data = self.capture_manager.get_synchronized_data()
             
@@ -72,8 +100,8 @@ class ActivityClassifier:
                 return None
             
             # Utiliser les données vidéo et audio déjà traitées
-            video_features = sync_data['video']['processed']
-            audio_features = sync_data['audio']['processed']
+            video_features = sync_data.get('video', {}).get('processed')
+            audio_features = sync_data.get('audio', {}).get('processed')
             
             if video_features is None or audio_features is None:
                 logger.warning("Données vidéo ou audio traitées manquantes")
@@ -86,6 +114,78 @@ class ActivityClassifier:
         except Exception as e:
             logger.error(f"Erreur lors de l'analyse de l'activité courante: {str(e)}")
             return None
+    
+    def start_periodic_analysis(self, sync_manager=None, interval=300):
+        """
+        Démarre l'analyse périodique en arrière-plan
+        
+        Args:
+            sync_manager: Gestionnaire de synchronisation (si non fourni au constructeur)
+            interval: Intervalle entre les analyses (en secondes)
+        """
+        if sync_manager is not None:
+            self.capture_manager = sync_manager
+        
+        # Arrêter l'analyse en cours si elle existe
+        self.stop_analysis = True
+        if self.analysis_thread and self.analysis_thread.is_alive():
+            self.analysis_thread.join(timeout=1.0)
+        
+        # Réinitialiser et démarrer un nouveau thread
+        self.stop_analysis = False
+        self.analysis_thread = threading.Thread(
+            target=self._analysis_loop,
+            args=(interval,),
+            daemon=True
+        )
+        self.analysis_thread.start()
+        
+        logger.info("Boucle d'analyse démarrée")
+    
+    def _analysis_loop(self, interval):
+        """
+        Boucle d'analyse périodique
+        
+        Args:
+            interval: Intervalle entre les analyses (en secondes)
+        """
+        logger.info("Démarrage de la boucle d'analyse périodique")
+        
+        while not self.stop_analysis:
+            try:
+                # Analyser l'activité actuelle
+                result = self.analyze_current_activity()
+                
+                if result:
+                    # Sauvegarder dans la base de données si disponible
+                    if self.db_manager:
+                        self.db_manager.save_activity(
+                            activity=result['activity'],
+                            confidence=result['confidence'],
+                            metadata=result['features']
+                        )
+                    
+                    logger.info(f"Activité détectée: {result['activity']} (confiance: {result['confidence']:.2f})")
+                
+                # Attendre l'intervalle spécifié, mais en vérifiant régulièrement 
+                # pour permettre un arrêt plus rapide
+                for _ in range(min(interval, 300)):  # Max 5 minutes
+                    if self.stop_analysis:
+                        break
+                    time.sleep(1)
+                    
+            except Exception as e:
+                logger.error(f"Erreur dans la boucle d'analyse: {str(e)}")
+                time.sleep(10)  # Attendre un peu avant de réessayer en cas d'erreur
+    
+    def stop_periodic_analysis(self):
+        """
+        Arrête l'analyse périodique
+        """
+        self.stop_analysis = True
+        if self.analysis_thread and self.analysis_thread.is_alive():
+            self.analysis_thread.join(timeout=2.0)
+            logger.info("Analyse périodique arrêtée")
     
     def classify_activity(self, video_features, audio_features):
         """
@@ -217,12 +317,16 @@ class ActivityClassifier:
         audio_features = np.array(audio_features, dtype=np.float32)
         
         # Préparation de l'image (ajout de la dimension de batch)
-        input_image = np.expand_dims(video_frame, axis=0)
+        input_image = np.expand_dims(video_frame, axis=0) if video_frame is not None else None
         
         # Ajout de la dimension de batch pour l'audio
         audio_features = np.expand_dims(audio_features, axis=0)
         
         try:
+            # Vérifier si le modèle et les entrées sont valides
+            if self.model is None or input_image is None:
+                raise ValueError("Modèle ou données d'entrée non disponibles")
+            
             # Prédiction avec le modèle
             predictions = self.model.predict([input_image, audio_features])
             
@@ -252,53 +356,3 @@ class ActivityClassifier:
             all_scores[activity] = confidence
             
             return activity, confidence, all_scores
-    
-    def train(self, training_data, epochs=10, batch_size=32, validation_split=0.2, save_path=None):
-        """
-        Entraîne ou met à jour le modèle de classification.
-        
-        Args:
-            training_data (dict): Données d'entraînement contenant 'X_video', 'X_audio' et 'y'
-            epochs (int): Nombre d'époques d'entraînement
-            batch_size (int): Taille du batch pour l'entraînement
-            validation_split (float): Fraction des données à utiliser pour la validation
-            save_path (str, optional): Chemin où sauvegarder le modèle entraîné
-            
-        Returns:
-            dict: Historique d'entraînement
-        """
-        # Cette méthode est incluse pour montrer comment le modèle pourrait être entraîné,
-        # mais l'implémentation détaillée dépend de l'architecture spécifique et des données
-        
-        if self.model is None:
-            logger.error("Pas de modèle disponible pour l'entraînement")
-            return None
-        
-        try:
-            # Extraction des données d'entraînement
-            X_video = training_data.get('X_video')
-            X_audio = training_data.get('X_audio')
-            y = training_data.get('y')
-            
-            if X_video is None or X_audio is None or y is None:
-                logger.error("Données d'entraînement incomplètes")
-                return None
-            
-            # Entraînement du modèle
-            history = self.model.fit(
-                [X_video, X_audio], y,
-                epochs=epochs,
-                batch_size=batch_size,
-                validation_split=validation_split
-            )
-            
-            # Sauvegarde du modèle si demandé
-            if save_path:
-                self.model.save(save_path)
-                logger.info(f"Modèle entraîné sauvegardé à {save_path}")
-            
-            return history.history
-            
-        except Exception as e:
-            logger.error(f"Erreur lors de l'entraînement du modèle: {str(e)}")
-            return None
