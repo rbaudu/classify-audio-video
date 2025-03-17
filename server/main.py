@@ -18,7 +18,7 @@ from server.capture.sync_manager import SyncManager
 from server.analysis.activity_classifier import ActivityClassifier
 from server.database.db_manager import DBManager
 from server.api.external_service import ExternalServiceClient
-from server.utils.error_system import ErrorSystem
+from server.utils.error_system import init_error_system
 from server.routes.web_routes import register_web_routes
 from server.routes.api_routes import register_api_routes
 from server.routes.video_routes import register_video_routes  # Nouvelle importation
@@ -60,7 +60,7 @@ def create_app():
     
     # Initialiser le système de gestion d'erreurs
     logger.info("Initialisation du système de gestion d'erreurs")
-    app.error_system = ErrorSystem()
+    init_error_system()
     
     # Enregistrer les routes
     register_web_routes(app)
@@ -89,6 +89,23 @@ def run_app():
     
     # Utiliser app.run() en mode développement
     app.run(host='0.0.0.0', port=5000)
+
+def start_server():
+    """Fonction de démarrage du serveur attendue par run.py"""
+    try:
+        global app
+        app = create_app()
+        # Lancer le serveur Flask dans un thread séparé pour pouvoir continuer l'exécution
+        server_thread = threading.Thread(target=run_app)
+        server_thread.daemon = True
+        server_thread.start()
+        return True
+    except Exception as e:
+        logger.error(f"Erreur lors du démarrage du serveur: {str(e)}")
+        return False
+
+# Ajout pour l'import manquant
+import threading
 
 if __name__ == '__main__':
     app = create_app()
