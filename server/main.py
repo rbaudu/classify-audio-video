@@ -50,8 +50,17 @@ def create_app():
         os.makedirs(data_dir, exist_ok=True)
         os.makedirs(analysis_dir, exist_ok=True)
         
+        # Initialiser le système de gestion d'erreurs
+        logger.info("Initialisation du système de gestion d'erreurs")
+        init_error_system()
+        
         # Initialiser les composants dans l'ordre
         db_manager = DBManager()
+        
+        # Vérifier que la base de données est prête
+        if not db_manager.check_connection():
+            raise Exception("Impossible de se connecter à la base de données")
+        
         external_service = ExternalServiceClient()
         
         # Initialiser le système de capture synchronisée
@@ -65,10 +74,6 @@ def create_app():
         
         # Initialiser le classificateur d'activité avec le SyncManager
         app.activity_classifier = ActivityClassifier(capture_manager=app.sync_manager)
-        
-        # Initialiser le système de gestion d'erreurs
-        logger.info("Initialisation du système de gestion d'erreurs")
-        init_error_system()
         
         # Enregistrer les routes
         register_web_routes(app)
@@ -92,7 +97,7 @@ def create_app():
         return app
         
     except Exception as e:
-        logger.error(f"Erreur lors de la création de l'application: {str(e)}")
+        logger.critical(f"Exception non gérée lors du démarrage: {str(e)}")
         raise
 
 def run_app():
