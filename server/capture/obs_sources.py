@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 import base64
 import time
+import os
+import tempfile
 from io import BytesIO
 from PIL import Image
 from obswebsocket import requests
@@ -32,6 +34,10 @@ class OBSSourcesMixin:
         self.current_backoff_duration = 5
         # Durée maximale de temporisation
         self.max_backoff_duration = 60
+        
+        # Pour la méthode de capture par fichier temporaire
+        self.temp_dir = tempfile.gettempdir()
+        self.temp_image_path = os.path.join(self.temp_dir, "obs_capture_temp.png")
     
     def _refresh_sources(self):
         """
@@ -185,6 +191,57 @@ class OBSSourcesMixin:
         # On est au-delà du seuil, on ne log pas cette erreur
         return False
     
+    def _capture_to_file(self, source_name):
+        """
+        Nouvelle méthode pour capturer l'image d'une source vers un fichier temporaire
+        
+        Args:
+            source_name (str): Nom de la source à capturer
+            
+        Returns:
+            bool: True si la capture a réussi, False sinon
+        """
+        try:
+            self.logger.info(f"Tentative de capture vers fichier pour: {source_name}")
+            
+            # Supprimer le fichier temporaire s'il existe déjà
+            if os.path.exists(self.temp_image_path):
+                try:
+                    os.remove(self.temp_image_path)
+                except Exception as e:
+                    self.logger.warning(f"Impossible de supprimer le fichier temporaire: {e}")
+            
+            # Récupérer la liste des scènes
+            scenes_response = self.ws.call(requests.GetSceneList())
+            current_scene = scenes_response.getCurrentScene()
+            
+            self.logger.info(f"Scène courante: {current_scene}")
+            
+            # Utiliser SaveSourceScreenshot pour enregistrer l'image
+            response = self.ws.call(requests.SaveSourceScreenshot(
+                sourceName=source_name,
+                filePath=self.temp_image_path,
+                fileFormat="png",
+                width=640,
+                height=360,
+                compressionQuality=-1  # Utiliser la qualité par défaut
+            ))
+            
+            self.logger.info(f"Réponse SaveSourceScreenshot: {response.status}")
+            
+            # Vérifier si le fichier a été créé
+            if os.path.exists(self.temp_image_path):
+                file_size = os.path.getsize(self.temp_image_path)
+                self.logger.info(f"Fichier temporaire créé: {self.temp_image_path}, taille: {file_size} octets")
+                return True
+            else:
+                self.logger.warning(f"Fichier temporaire non créé: {self.temp_image_path}")
+                return False
+            
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la capture vers fichier: {e}")
+            return False
+    
     def get_video_frame(self, source_name=None):
         """
         Récupère une image de la source vidéo spécifiée ou la source par défaut
@@ -217,10 +274,24 @@ class OBSSourcesMixin:
                 return dummy_frame
             
             try:
-                # Appel à l'API OBS pour récupérer une capture d'écran de la source
-                self.logger.info(f"Tentative de capture d'image pour la source: {source_name}")
+                # Méthode 1: Capture vers fichier (OBS 31.x)
+                if self._capture_to_file(source_name):
+                    try:
+                        # Charger l'image depuis le fichier
+                        frame = cv2.imread(self.temp_image_path)
+                        if frame is not None and frame.size > 0:
+                            self.logger.info(f"Image chargée avec succès: {frame.shape}")
+                            self._handle_capture_success()
+                            self.current_frame = frame
+                            self.last_successful_frame = frame
+                            return frame
+                        else:
+                            self.logger.warning(f"Image chargée vide ou invalide")
+                    except Exception as e:
+                        self.logger.error(f"Erreur lors du chargement de l'image: {e}")
                 
-                # Méthode 1: Utiliser TakeSourceScreenshot (OBS 28+)
+                # Méthode 2: Utiliser TakeSourceScreenshot (OBS 28+)
+                self.logger.info(f"Tentative de capture avec TakeSourceScreenshot pour: {source_name}")
                 try:
                     response = self.ws.call(requests.TakeSourceScreenshot(
                         sourceName=source_name,
@@ -240,21 +311,34 @@ class OBSSourcesMixin:
                     elif hasattr(response, 'imageData'):
                         img_data = response.imageData
                     else:
-                        # Si on ne trouve pas les données d'image, on lève une exception pour passer à la méthode alternative
+                        # Si on ne trouve pas les données d'image, loguer la structure de la réponse
+                        self.logger.info(f"Structure de la réponse TakeSourceScreenshot: {dir(response)}")
+                        for attr in dir(response):
+                            if not attr.startswith('_') and not callable(getattr(response, attr)):
+                                value = getattr(response, attr)
+                                self.logger.info(f"Attribut {attr}: {type(value)} - {str(value)[:100]}")
+                        
                         raise Exception("Format de réponse non reconnu pour TakeSourceScreenshot")
                 
                 except Exception as e:
-                    # Méthode 2: Essayer avec GetSourceScreenshot (OBS 31.x)
-                    self.logger.info(f"Tentative alternative avec GetSourceScreenshot pour : {source_name}")
+                    # Méthode 3: Essayer avec GetSourceScreenshot (OBS 31.x)
+                    self.logger.info(f"Tentative avec GetSourceScreenshot pour: {source_name}")
                     response = self.ws.call(requests.GetSourceScreenshot(
                         sourceName=source_name,
                         imageFormat="png",
                         imageWidth=640,
                         imageHeight=360
                     ))
-                    img_data = response.getImageData() if hasattr(response, 'getImageData') else None
+                    self.logger.info(f"Structure de la réponse GetSourceScreenshot: {dir(response)}")
+                    for attr in dir(response):
+                        if not attr.startswith('_') and not callable(getattr(response, attr)):
+                            value = getattr(response, attr)
+                            self.logger.info(f"Attribut {attr}: {type(value)} - {str(value)[:100]}")
                     
-                    if not img_data and hasattr(response, 'data') and isinstance(response.data, dict):
+                    img_data = None
+                    if hasattr(response, 'getImageData') and callable(response.getImageData):
+                        img_data = response.getImageData()
+                    elif hasattr(response, 'data') and isinstance(response.data, dict):
                         img_data = response.data.get('imageData')
                 
                 # Vérifier si img_data est valide
