@@ -10,6 +10,7 @@ from queue import Queue
 import io
 import numpy as np
 from PIL import Image
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ class SyncManager:
         self.current_audio_data = None
         self.last_sync_time = 0
         
+        # Fallback image (pour quand il n'y a pas de vidéo)
+        self.fallback_image = self._create_fallback_image()
+        
         # Verrou pour l'accès aux données synchronisées
         self.sync_lock = threading.Lock()
         
@@ -47,6 +51,54 @@ class SyncManager:
         self.is_running = False
         
         logger.info("Gestionnaire de synchronisation initialisé")
+    
+    def _create_fallback_image(self, width=640, height=480):
+        """Crée une image de secours quand la vidéo n'est pas disponible
+        
+        Args:
+            width (int): Largeur de l'image
+            height (int): Hauteur de l'image
+            
+        Returns:
+            PIL.Image.Image: Image de secours
+        """
+        try:
+            # Créer une image noire avec un message
+            img = Image.new('RGB', (width, height), color='black')
+            
+            # Essayer d'ajouter un texte explicatif
+            try:
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(img)
+                
+                # Messages à afficher
+                lines = [
+                    "Aucune source vidéo disponible",
+                    "",
+                    "Vérifiez que:",
+                    "1. OBS Studio est en cours d'exécution",
+                    "2. Le plugin OBS WebSocket est activé",
+                    "3. Une source vidéo est configurée et active"
+                ]
+                
+                # Commencer à dessiner le texte au centre
+                y_position = height // 3
+                for line in lines:
+                    # Mesurer la taille du texte (approximativement)
+                    text_width = len(line) * 10
+                    x_position = (width - text_width) // 2
+                    
+                    # Dessiner le texte
+                    draw.text((x_position, y_position), line, fill='white')
+                    y_position += 30
+            except Exception as e:
+                logger.warning(f"Impossible d'ajouter du texte à l'image de secours: {e}")
+            
+            return img
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de l'image de secours: {e}")
+            # En cas d'erreur, retourner une image vide
+            return Image.new('RGB', (width, height), color='black')
     
     def start(self):
         """Démarre la capture synchronisée"""
@@ -57,15 +109,23 @@ class SyncManager:
         # Démarrer la capture audio
         self.pyaudio_capture.start()
         
+        # Récupérer et rafraîchir les sources vidéo
+        if hasattr(self.obs_capture, '_get_sources'):
+            self.obs_capture._get_sources()
+        
         # Démarrer la capture vidéo (utiliser la première source vidéo disponible)
         video_source = None
-        if self.obs_capture.video_sources:
+        if hasattr(self.obs_capture, 'video_sources') and self.obs_capture.video_sources:
             video_source = self.obs_capture.video_sources[0]
+            logger.info(f"Utilisation de la source vidéo: {video_source}")
         
         if video_source:
             self.obs_capture.start_capture(source_name=video_source, interval=0.1)
         else:
             logger.warning("Aucune source vidéo disponible, capture vidéo désactivée")
+            # Initialiser avec l'image de secours
+            with self.sync_lock:
+                self.current_video_frame = self.fallback_image
         
         # Démarrer le thread de synchronisation
         self.is_running = True
@@ -85,6 +145,10 @@ class SyncManager:
         while self.is_running:
             # Récupérer une image de la caméra
             video_frame, video_time = self.obs_capture.get_current_frame()
+            
+            # Si pas de vidéo, utiliser l'image de secours
+            if video_frame is None:
+                video_frame = self.fallback_image
             
             # Récupérer des données audio récentes
             audio_data = self.pyaudio_capture.get_latest_audio()
@@ -111,7 +175,7 @@ class SyncManager:
             tuple: (video_frame, audio_data, timestamp) ou (None, None, 0) si aucune donnée
         """
         with self.sync_lock:
-            if self.current_video_frame is None or self.current_audio_data is None:
+            if self.current_video_frame is None and self.current_audio_data is None:
                 return None, None, 0
             return self.current_video_frame, self.current_audio_data, self.last_sync_time
     
@@ -119,7 +183,7 @@ class SyncManager:
         """Récupère l'image courante
         
         Returns:
-            PIL.Image.Image: Image courante ou None
+            PIL.Image.Image: Image courante ou image de secours
         """
         # Récupérer directement depuis OBS (plus récent)
         frame, _ = self.obs_capture.get_current_frame()
@@ -127,7 +191,10 @@ class SyncManager:
         # Si aucune image n'est disponible, essayer d'utiliser l'image synchronisée
         if frame is None:
             with self.sync_lock:
-                frame = self.current_video_frame
+                if self.current_video_frame is not None:
+                    frame = self.current_video_frame
+                else:
+                    frame = self.fallback_image
         
         return frame
     
@@ -181,9 +248,9 @@ class SyncManager:
         """Vérifie si la vidéo est disponible
         
         Returns:
-            bool: True si la vidéo est disponible
+            bool: True si la vidéo est disponible (autre que l'image de secours)
         """
-        frame = self.get_current_frame()
+        frame, _ = self.obs_capture.get_current_frame()
         return frame is not None
     
     def is_audio_available(self):
