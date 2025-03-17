@@ -58,6 +58,24 @@ class DBManager:
             
         logger.info("Base de données initialisée avec succès")
     
+    def check_connection(self):
+        """
+        Vérifie si la connexion à la base de données est établie.
+        
+        Returns:
+            bool: True si la connexion est établie, False sinon
+        """
+        try:
+            with self.lock:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                conn.close()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur de connexion à la base de données: {str(e)}")
+            return False
+    
     def _init_db(self):
         """
         Initialise la structure de la base de données.
@@ -66,16 +84,30 @@ class DBManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Créer les tables si elles n'existent pas
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS activities (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    activity TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    timestamp INTEGER NOT NULL,
-                    metadata TEXT
-                )
-            ''')
+            # Vérifier la structure de la table actuelle
+            cursor.execute("PRAGMA table_info(activities)")
+            columns = cursor.fetchall()
+            
+            # Si la table existe et a une colonne date_time
+            has_date_time = any(col[1] == 'date_time' for col in columns)
+            
+            # Si la table n'existe pas ou a une structure incorrecte, la recréer
+            if not columns or has_date_time:
+                # Supprimer la table si elle existe
+                cursor.execute("DROP TABLE IF EXISTS activities")
+                
+                # Créer la table avec la structure correcte
+                cursor.execute('''
+                    CREATE TABLE activities (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        activity TEXT NOT NULL,
+                        confidence REAL NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        metadata TEXT
+                    )
+                ''')
+                
+                logger.info("Table activities créée avec la structure correcte")
             
             # Index pour optimiser les requêtes par timestamp
             cursor.execute('''
