@@ -27,7 +27,7 @@ class SyncManager:
     S'occupe de capturer les deux flux, de les synchroniser et de les traiter.
     """
     
-    def __init__(self):
+    def __init__(self, stop_event=None):
         self.logger = logging.getLogger(__name__)
         
         # Instancier les objets de capture
@@ -38,6 +38,9 @@ class SyncManager:
         # Variables d'état
         self.is_running = False
         self.capture_thread = None
+        
+        # Événement d'arrêt
+        self.stop_event = stop_event or threading.Event()
         
         # Buffer pour les frames vidéo avec horodatage
         self.video_buffer = deque(maxlen=30)  # 30 frames ~ 1 sec à 30 FPS
@@ -60,6 +63,9 @@ class SyncManager:
             return True
         
         try:
+            # Réinitialiser l'événement d'arrêt
+            self.stop_event.clear()
+            
             # S'assurer que la connexion OBS est établie
             if not self.obs_capture.connected:
                 if not self.obs_capture.connect():
@@ -83,10 +89,13 @@ class SyncManager:
             self.logger.error(f"Erreur lors du démarrage de la capture synchronisée: {str(e)}")
             return False
     
-    def stop(self):
+    def stop(self, timeout=2.0):
         """
         Arrête la capture synchronisée
         
+        Args:
+            timeout (float): Temps maximum d'attente en secondes
+            
         Returns:
             bool: True si arrêté avec succès, False sinon
         """
@@ -94,10 +103,17 @@ class SyncManager:
             return True
         
         try:
-            # Arrêter le thread de capture
+            # Signaler l'arrêt
             self.is_running = False
+            self.stop_event.set()
+            
+            # Arrêter le thread de capture avec timeout
             if self.capture_thread:
-                self.capture_thread.join(timeout=2.0)
+                self.logger.info(f"Attente de l'arrêt du thread de capture (timeout: {timeout}s)...")
+                self.capture_thread.join(timeout=timeout)
+                
+                if self.capture_thread.is_alive():
+                    self.logger.warning(f"Le thread de capture ne s'est pas terminé dans le délai imparti ({timeout}s)")
             
             # Arrêter la capture audio
             self.audio_capture.stop_capture()
@@ -114,7 +130,7 @@ class SyncManager:
         """
         self.logger.info("Thread de capture synchronisée démarré")
         
-        while self.is_running:
+        while self.is_running and not self.stop_event.is_set():
             try:
                 # 1. Capturer une frame vidéo depuis OBS
                 frame = self.obs_capture.get_video_frame(VIDEO_SOURCE_NAME)
@@ -127,12 +143,24 @@ class SyncManager:
                         'timestamp': timestamp
                     })
                 
-                # 2. Dormir brièvement pour éviter de surcharger le CPU
-                time.sleep(0.03)  # ~30 FPS
+                # 2. Vérifier si on doit s'arrêter
+                if not self.is_running or self.stop_event.is_set():
+                    break
+                
+                # 3. Dormir brièvement pour éviter de surcharger le CPU
+                # Utiliser une période courte pour pouvoir s'arrêter rapidement
+                time.sleep(0.01)  # Réactif aux signaux d'arrêt
                 
             except Exception as e:
                 self.logger.error(f"Erreur dans la boucle de capture: {str(e)}")
-                time.sleep(0.1)  # Pause en cas d'erreur
+                # Pause courte en cas d'erreur pour éviter de surcharger le CPU
+                time.sleep(0.1)
+                
+                # Vérifier si on doit s'arrêter même en cas d'erreur
+                if not self.is_running or self.stop_event.is_set():
+                    break
+        
+        self.logger.info("Thread de capture synchronisée terminé")
     
     def get_synchronized_data(self):
         """
