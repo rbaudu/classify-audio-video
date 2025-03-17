@@ -95,6 +95,31 @@ Le système intègre désormais une fonctionnalité de reconnexion automatique �
    - En cas d'interruptions fréquentes, l'application conserve la dernière image valide
    - Vérifiez la stabilité de votre connexion réseau si OBS est exécuté sur une machine distante
 
+### Erreur lors de la capture d'image: 'img'
+
+Cette erreur a été corrigée dans la version de Mars 2025, mais si vous rencontrez toujours ce problème :
+
+1. **Problème de version OBS et obs-websocket**
+   - Ce problème peut survenir avec différentes versions d'OBS et du plugin obs-websocket
+   - La correction détecte maintenant les attributs 'img' et 'imageData' dans la réponse
+
+2. **Si vous avez une ancienne version**
+   - Mettez à jour votre application vers la dernière version
+   - Si la mise à jour n'est pas possible, vous pouvez modifier manuellement le fichier `server/capture/obs_sources.py` :
+     ```python
+     # Après avoir récupéré la réponse du screenshot, ajoutez :
+     if hasattr(response, 'img'):
+         img_data = response.img
+     elif hasattr(response, 'imageData'):
+         img_data = response.imageData
+     else:
+         # Gérer l'erreur
+     ```
+
+3. **Diagnostic**
+   - Activez la journalisation détaillée pour voir les attributs disponibles
+   - Vérifiez la version de votre plugin obs-websocket (v4.x utilise 'img', v5.x utilise généralement 'imageData')
+
 ## Problèmes audio
 
 ### Erreur PyAudio / Périphérique audio
@@ -229,6 +254,35 @@ Le système intègre désormais une fonctionnalité de reconnexion automatique �
 - Les journaux sont stockés dans `activity_classifier.log`
 - Vous pouvez ajuster le niveau de journalisation dans `server/main.py`
 - Nettoyez régulièrement les anciens journaux
+
+## Problèmes d'arrêt du programme
+
+### L'application ne répond pas au CTRL+C
+
+Ce problème a été corrigé dans la version de Mars 2025, mais si vous rencontrez toujours des difficultés :
+
+1. **Mécanisme d'arrêt amélioré**
+   - La dernière version implémente un système d'arrêt robuste avec une temporisation maximale
+   - Un événement global (`stop_event`) coordonne l'arrêt de tous les threads
+
+2. **Si vous avez une ancienne version**
+   - Mettez à jour votre application vers la dernière version
+   - Si la mise à jour n'est pas possible, vous pouvez essayer de terminer le processus Python manuellement :
+     ```bash
+     # Sur Linux/Mac
+     pkill -f "python run.py"
+     
+     # Sur Windows
+     taskkill /f /im python.exe
+     ```
+
+3. **Arrêt forcé de secours**
+   - Si aucune méthode ne fonctionne, le nouveau code implémente un arrêt forcé après 10 secondes
+   - Vous pouvez ajuster ce délai en modifiant `MAX_SHUTDOWN_TIME` dans le fichier `run.py`
+
+4. **Problèmes avec les threads**
+   - Si votre application se bloque toujours, vérifiez les processus en arrière-plan qui pourraient ne pas répondre aux signaux d'arrêt
+   - La version corrigée gère désormais correctement les threads de capture vidéo, audio et d'analyse
 
 ## Problèmes avec les tests unitaires
 
