@@ -5,8 +5,32 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 
 ## Nouveautés
 
+### Architecture JavaScript modulaire (Mars 2025)
+La dernière mise à jour introduit une architecture JavaScript modulaire pour améliorer la maintenabilité et les performances :
+
+#### Scripts frontend modulaires
+- **Division des fichiers volumineux** : Les fichiers JavaScript comme `model_testing.js` et `statistics.js` ont été divisés en modules spécialisés
+- **Chargement asynchrone** : Modules chargés de manière asynchrone pour optimiser les performances
+- **Architecture flexible** : Structure qui facilite les évolutions futures et les tests
+- **Meilleur affichage des flux** : Amélioration de l'affichage des flux vidéo et audio avec gestion robuste des erreurs
+
+#### Structure des modules JavaScript
+L'architecture frontend a été réorganisée en modules spécialisés :
+
+**Pour la page de test de modèle** :
+- `video-feed.js` : Gestion de l'affichage des flux vidéo
+- `audio-visualizer.js` : Visualisation et traitement des flux audio
+- `classification.js` : Analyse et classification des activités
+- `model-info.js` : Gestion des informations et opérations sur le modèle
+
+**Pour la page de statistiques** :
+- `data-loader.js` : Chargement et mise en cache des données
+- `chart-manager.js` : Création et gestion des graphiques
+- `export-manager.js` : Exportation des données dans différents formats
+- `summary-manager.js` : Génération des résumés statistiques
+
 ### Améliorations de fiabilité (Mars 2025)
-La dernière mise à jour améliore la fiabilité de l'application en adressant deux problèmes majeurs :
+La mise à jour améliore la fiabilité de l'application en adressant deux problèmes majeurs :
 - **Correction de la capture d'images OBS** : Résolution du problème "Erreur lors de la capture d'image: 'img'" grâce à une meilleure gestion des attributs de réponse OBS, avec support pour différentes versions d'OBS
 - **Gestion améliorée de l'arrêt du programme** : Implémentation d'un mécanisme robuste de gestion CTRL+C et arrêt des threads, permettant une terminaison propre et rapide de l'application
 
@@ -69,6 +93,7 @@ Un système robuste de gestion d'erreurs a été implémenté pour améliorer la
 - **Tests unitaires** : Couverture de test complète pour tous les modules principaux
 - **Gestion d'erreurs robuste** : Système complet pour la détection, le logging et la récupération des erreurs
 - **Arrêt propre et réactif** : Mécanisme fiable pour terminer proprement l'application avec CTRL+C
+- **Architecture frontend modulaire** : Organisation du code JavaScript en modules spécialisés pour améliorer la maintenabilité
 
 ## Documentation détaillée
 
@@ -82,6 +107,7 @@ La documentation complète est divisée en plusieurs sections pour une meilleure
 - [Fonctionnement technique](docs/TECHNICAL.md) - Explications techniques sur le fonctionnement interne
 - [Dépannage](docs/TROUBLESHOOTING.md) - Solutions aux problèmes courants
 - [Développement et extension](docs/DEVELOPMENT.md) - Guide pour étendre l'application
+- [Architecture JavaScript](docs/JS_ARCHITECTURE.md) - Détails sur l'architecture modulaire JavaScript
 
 ## Contribution
 
