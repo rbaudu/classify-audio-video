@@ -58,8 +58,8 @@ def init_app():
     
     # Création de l'app Flask
     app = Flask(__name__, 
-                static_folder='../static',
-                template_folder='../templates')
+                static_folder='../../web/static',
+                template_folder='../../web/templates')
     
     # Enregistrement des routes API
     register_api_routes(app, db_manager, sync_manager, activity_classifier)
