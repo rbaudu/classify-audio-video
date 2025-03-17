@@ -1,358 +1,391 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import logging
-import time
-import threading
 import numpy as np
 import pyaudio
-import wave
-import os
-from collections import deque
+import threading
+import time
+import queue
 
-# Import de la configuration
-from server import (
-    AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_FORMAT, AUDIO_CHUNK_SIZE,
-    AUDIO_VIDEO_SYNC_BUFFER_SIZE
-)
+from server import AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_FORMAT, AUDIO_CHUNK_SIZE
 
 class PyAudioCapture:
     """
-    Classe pour capturer l'audio directement via PyAudio.
-    Permet de capturer l'audio depuis le microphone par défaut ou spécifié.
+    Classe pour gérer la capture audio directe via PyAudio.
     """
     
-    def __init__(self):
+    def __init__(self, device_index=None):
+        """
+        Initialise la capture audio.
+        
+        Args:
+            device_index (int, optional): Indice du périphérique audio à utiliser. 
+                                         None pour utiliser le périphérique par défaut.
+        """
         self.logger = logging.getLogger(__name__)
-        self.p = None  # Instance PyAudio
-        self.stream = None  # Stream audio
+        self.device_index = device_index
+        self.audio = None
+        self.stream = None
+        self.is_capturing = False
+        self.lock = threading.RLock()
         
-        # État de la capture
-        self.is_recording = False
-        self.recording_thread = None
+        # Buffer circulaire pour stocker les données audio récentes
+        self.audio_buffer = queue.Queue(maxsize=100)  # ~6 secondes à 16kHz
         
-        # Buffer circulaire pour stocker les dernières données audio capturées
-        # Taille calculée pour contenir AUDIO_VIDEO_SYNC_BUFFER_SIZE secondes d'audio
-        buffer_size = int(AUDIO_SAMPLE_RATE * AUDIO_VIDEO_SYNC_BUFFER_SIZE)
-        self.audio_buffer = deque(maxlen=buffer_size)
+        # Thread de capture
+        self.capture_thread = None
         
-        # Métadonnées du dernier audio capturé
-        self.current_audio = None
-        
-        # Horodatage pour la synchronisation
-        self.last_capture_time = 0
-        
-        # Tentative d'initialisation de PyAudio
+        # Initialiser PyAudio
         self.initialize()
     
     def initialize(self):
         """
-        Initialise PyAudio et liste les périphériques disponibles
+        Initialise l'objet PyAudio et liste les périphériques disponibles.
         """
         try:
-            self.p = pyaudio.PyAudio()
+            self.audio = pyaudio.PyAudio()
             
-            # Lister les périphériques audio disponibles
-            info = []
-            for i in range(self.p.get_device_count()):
-                dev_info = self.p.get_device_info_by_index(i)
-                info.append(dev_info)
-                if dev_info['maxInputChannels'] > 0:  # C'est un périphérique d'entrée
-                    self.logger.info(f"Input Device {i}: {dev_info['name']}")
+            # Lister les périphériques d'entrée disponibles
+            info = self.audio.get_host_api_info_by_index(0)
+            numdevices = info.get('deviceCount')
             
-            self.logger.info(f"PyAudio initialisé avec succès. {len(info)} périphériques trouvés.")
-            return True
+            # Réinitialiser l'indice si la valeur fournie est invalide
+            if self.device_index is not None and (self.device_index < 0 or self.device_index >= numdevices):
+                self.logger.warning(f"Indice de périphérique {self.device_index} hors limites. Utilisation du périphérique par défaut.")
+                self.device_index = None
+            
+            # Chercher le premier périphérique d'entrée disponible si aucun indice n'est fourni
+            if self.device_index is None:
+                for i in range(numdevices):
+                    if self.audio.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels') > 0:
+                        dev_info = self.audio.get_device_info_by_host_api_device_index(0, i)
+                        self.logger.info(f"Input Device {i}: {dev_info.get('name')}")
+            
+            total_devices = self.audio.get_device_count()
+            self.logger.info(f"PyAudio initialisé avec succès. {total_devices} périphériques trouvés.")
+            
+            # Si aucun périphérique d'entrée n'est trouvé, utiliser l'indice 0 par défaut
+            if self.device_index is None:
+                self.device_index = 0
+                self.logger.info(f"Utilisation du périphérique d'entrée par défaut (indice {self.device_index})")
+            
         except Exception as e:
             self.logger.error(f"Erreur lors de l'initialisation de PyAudio: {str(e)}")
-            return False
+            if self.audio:
+                self.audio.terminate()
+                self.audio = None
     
-    def check_device(self):
+    def list_devices(self):
         """
-        Vérifie si au moins un périphérique audio d'entrée est disponible
+        Liste tous les périphériques audio disponibles.
         
         Returns:
-            bool: True si au moins un périphérique est disponible, False sinon
+            list: Liste des périphériques avec leurs indices et noms
         """
-        try:
-            if not self.p:
-                if not self.initialize():
-                    return False
-            
-            # Vérifier si au moins un périphérique d'entrée est disponible
-            devices = self.get_devices()
-            if not devices:
-                self.logger.warning("Aucun périphérique audio d'entrée disponible")
-                return False
-            
-            # Si la capture est en cours, vérifier si le stream est actif
-            if self.is_recording and self.stream:
-                return self.stream.is_active()
-            
-            # Sinon, simplement confirmer qu'il y a des périphériques disponibles
-            return True
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la vérification du périphérique audio: {str(e)}")
-            return False
+        if not self.audio:
+            self.logger.error("PyAudio non initialisé")
+            return []
+        
+        devices = []
+        for i in range(self.audio.get_device_count()):
+            try:
+                dev_info = self.audio.get_device_info_by_index(i)
+                name = dev_info.get('name')
+                max_input_channels = dev_info.get('maxInputChannels')
+                max_output_channels = dev_info.get('maxOutputChannels')
+                
+                if max_input_channels > 0:
+                    devices.append({
+                        'index': i,
+                        'name': name,
+                        'max_input_channels': max_input_channels,
+                        'max_output_channels': max_output_channels,
+                        'default_sample_rate': dev_info.get('defaultSampleRate')
+                    })
+                    
+                    self.logger.info(f"Périphérique audio {i}: {name} - {max_input_channels} canaux d'entrée")
+            except Exception as e:
+                self.logger.warning(f"Erreur lors de la récupération des informations du périphérique {i}: {str(e)}")
+        
+        return devices
     
     def start_capture(self, device_index=None):
         """
-        Démarre la capture audio en continu
+        Démarre la capture audio.
         
         Args:
-            device_index (int, optional): Indice du périphérique à utiliser. None = périphérique par défaut.
+            device_index (int, optional): Indice du périphérique à utiliser, remplace celui fourni au constructeur.
         
         Returns:
-            bool: True si la capture a démarré avec succès, False sinon
+            bool: True si la capture a démarré avec succès, False sinon.
         """
-        if self.is_recording:
-            self.logger.warning("La capture audio est déjà en cours.")
-            return True
-        
-        if not self.p:
-            self.initialize()
-        
-        try:
-            # Ouvrir le stream audio
-            self.stream = self.p.open(
-                format=AUDIO_FORMAT,
-                channels=AUDIO_CHANNELS,
-                rate=AUDIO_SAMPLE_RATE,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=AUDIO_CHUNK_SIZE,
-                stream_callback=self._audio_callback
-            )
+        with self.lock:
+            if self.is_capturing:
+                self.logger.warning("La capture audio est déjà en cours")
+                return True
             
-            # Démarrer le stream
-            self.stream.start_stream()
-            self.is_recording = True
-            self.last_capture_time = time.time()
+            if device_index is not None:
+                self.device_index = device_index
             
-            self.logger.info(f"Capture audio démarrée avec périphérique {device_index if device_index is not None else 'par défaut'}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Erreur lors du démarrage de la capture audio: {str(e)}")
-            return False
+            if not self.audio:
+                self.initialize()
+                if not self.audio:
+                    self.logger.error("Impossible de démarrer la capture: PyAudio non initialisé")
+                    return False
+            
+            try:
+                # Récupérer les informations du périphérique
+                try:
+                    device_info = self.audio.get_device_info_by_index(self.device_index)
+                    device_name = device_info.get('name', 'Périphérique inconnu')
+                    self.logger.info(f"Ouverture du flux audio sur le périphérique {self.device_index}: {device_name}")
+                except:
+                    self.logger.warning(f"Impossible d'obtenir les informations du périphérique {self.device_index}. Utilisation du périphérique par défaut.")
+                    device_name = "périphérique par défaut"
+                
+                # Ouvrir le flux audio
+                self.stream = self.audio.open(
+                    format=AUDIO_FORMAT,
+                    channels=AUDIO_CHANNELS,
+                    rate=AUDIO_SAMPLE_RATE,
+                    input=True,
+                    input_device_index=self.device_index,
+                    frames_per_buffer=AUDIO_CHUNK_SIZE,
+                    stream_callback=self._audio_callback
+                )
+                
+                self.is_capturing = True
+                self.stream.start_stream()
+                self.logger.info(f"Capture audio démarrée avec {device_name}")
+                
+                # Démarrer un thread pour vider périodiquement le buffer si nécessaire
+                self.capture_thread = threading.Thread(target=self._capture_loop)
+                self.capture_thread.daemon = True
+                self.capture_thread.start()
+                
+                return True
+            except Exception as e:
+                self.logger.error(f"Erreur lors du démarrage de la capture audio: {str(e)}")
+                
+                # Essayer de récupérer plus d'informations sur l'erreur
+                try:
+                    device_count = self.audio.get_device_count()
+                    self.logger.info(f"Nombre total de périphériques: {device_count}")
+                    
+                    # Tester rapidement chaque périphérique d'entrée
+                    working_devices = []
+                    for i in range(device_count):
+                        try:
+                            dev_info = self.audio.get_device_info_by_index(i)
+                            if dev_info.get('maxInputChannels') > 0:
+                                self.logger.info(f"Test du périphérique {i}: {dev_info.get('name')}")
+                                test_stream = self.audio.open(
+                                    format=AUDIO_FORMAT,
+                                    channels=AUDIO_CHANNELS,
+                                    rate=AUDIO_SAMPLE_RATE,
+                                    input=True,
+                                    input_device_index=i,
+                                    frames_per_buffer=AUDIO_CHUNK_SIZE,
+                                    start=False
+                                )
+                                test_stream.close()
+                                working_devices.append(i)
+                                self.logger.info(f"Périphérique {i} fonctionne")
+                        except Exception as test_error:
+                            self.logger.warning(f"Périphérique {i} non fonctionnel: {str(test_error)}")
+                    
+                    # Si d'autres périphériques fonctionnent, suggérer d'utiliser l'un d'entre eux
+                    if working_devices:
+                        self.logger.info(f"Périphériques fonctionnels: {working_devices}")
+                        # Utiliser le premier périphérique fonctionnel
+                        alternative_device = working_devices[0]
+                        if alternative_device != self.device_index:
+                            self.logger.info(f"Tentative avec le périphérique alternatif {alternative_device}")
+                            return self.start_capture(alternative_device)
+                except Exception as debug_error:
+                    self.logger.error(f"Erreur lors du diagnostic des périphériques audio: {str(debug_error)}")
+                
+                if self.stream:
+                    self.stream.close()
+                    self.stream = None
+                
+                self.is_capturing = False
+                return False
     
     def _audio_callback(self, in_data, frame_count, time_info, status):
         """
-        Callback appelé par PyAudio lorsque des données audio sont disponibles
+        Callback appelé par PyAudio quand de nouvelles données audio sont disponibles.
         
         Args:
             in_data (bytes): Données audio brutes
-            frame_count (int): Nombre de frames dans les données
+            frame_count (int): Nombre de frames
             time_info (dict): Informations de timing
             status (int): Statut de la capture
-            
+        
         Returns:
             tuple: (None, pyaudio.paContinue)
         """
+        if status:
+            self.logger.warning(f"Statut audio non-zéro: {status}")
+        
         try:
-            # Convertir les données audio en tableau numpy
-            audio_data = np.frombuffer(in_data, dtype=np.int16)
+            # Ajouter les données au buffer, en supprimant les plus anciennes si nécessaire
+            if self.audio_buffer.full():
+                try:
+                    self.audio_buffer.get_nowait()  # Vider une entrée ancienne
+                except queue.Empty:
+                    pass  # Rien à vider
             
-            # Ajouter au buffer
-            self.audio_buffer.extend(audio_data)
-            
-            # Mettre à jour l'horodatage
-            self.last_capture_time = time.time()
-            
-            # Générer des métadonnées audio (analyse simple)
-            self._analyze_audio_data(audio_data)
-            
-            return (None, pyaudio.paContinue)
+            self.audio_buffer.put(in_data)
         except Exception as e:
             self.logger.error(f"Erreur dans le callback audio: {str(e)}")
-            return (None, pyaudio.paContinue)
+        
+        return (None, pyaudio.paContinue)
     
-    def _analyze_audio_data(self, audio_data):
+    def _capture_loop(self):
         """
-        Analyse simple des données audio pour extraire des caractéristiques
-        
-        Args:
-            audio_data (numpy.ndarray): Données audio à analyser
+        Boucle de thread pour maintenir la capture active.
         """
-        if len(audio_data) == 0:
-            return
-        
-        try:
-            # Normaliser l'audio entre -1 et 1 pour l'analyse
-            normalized = audio_data.astype(np.float32) / 32768.0
+        while self.is_capturing:
+            # Vérifier si le flux est toujours actif
+            if self.stream and not self.stream.is_active():
+                self.logger.warning("Le flux audio s'est arrêté de manière inattendue. Tentative de redémarrage.")
+                with self.lock:
+                    self.stop_capture()
+                    self.start_capture()
             
-            # Calculer le niveau moyen
-            average_level = np.mean(np.abs(normalized)) * 100
-            
-            # Calculer le niveau de crête
-            peak_level = np.max(np.abs(normalized)) * 100
-            
-            # Détection simple de parole basée sur le niveau et le Zero-Crossing Rate
-            zcr = np.sum(np.abs(np.diff(np.signbit(normalized)))) / (2 * len(normalized))
-            speech_detected = (average_level > 5) and (zcr > 0.05)
-            
-            # Analyse spectrale très simplifiée (pour des métriques basiques)
-            if len(normalized) > AUDIO_CHUNK_SIZE // 2:
-                # FFT rapide
-                fft_result = np.abs(np.fft.rfft(normalized[:AUDIO_CHUNK_SIZE]))
-                freqs = np.fft.rfftfreq(AUDIO_CHUNK_SIZE, 1/AUDIO_SAMPLE_RATE)
-                
-                # Trouver quelques fréquences dominantes
-                n_peaks = min(10, len(fft_result)//10)
-                peak_indices = np.argpartition(fft_result, -n_peaks)[-n_peaks:]
-                frequencies = freqs[peak_indices]
-                amplitudes = fft_result[peak_indices]
-            else:
-                frequencies = np.array([0])
-                amplitudes = np.array([0])
-            
-            # Stocker les métadonnées
-            self.current_audio = {
-                'frequencies': frequencies,
-                'amplitudes': amplitudes,
-                'average_level': average_level,
-                'peak_level': peak_level,
-                'speech_detected': speech_detected,
-                'timestamp': self.last_capture_time
-            }
-        except Exception as e:
-            self.logger.error(f"Erreur lors de l'analyse audio: {str(e)}")
+            # Dormir pour éviter de surcharger le CPU
+            time.sleep(1)
     
     def stop_capture(self):
         """
-        Arrête la capture audio
+        Arrête la capture audio.
+        """
+        with self.lock:
+            if not self.is_capturing:
+                return
+            
+            self.is_capturing = False
+            
+            if self.stream:
+                try:
+                    self.stream.stop_stream()
+                    self.stream.close()
+                except Exception as e:
+                    self.logger.error(f"Erreur lors de l'arrêt du flux audio: {str(e)}")
+                finally:
+                    self.stream = None
+            
+            # Vider le buffer
+            while not self.audio_buffer.empty():
+                try:
+                    self.audio_buffer.get_nowait()
+                except queue.Empty:
+                    break
+            
+            self.logger.info("Capture audio arrêtée")
+    
+    def get_audio_data(self, duration_ms=1000):
+        """
+        Récupère les dernières données audio capturées.
+        
+        Args:
+            duration_ms (int): Durée des données audio à récupérer en millisecondes
         
         Returns:
-            bool: True si l'arrêt a réussi, False sinon
+            numpy.ndarray: Données audio au format numpy (int16)
         """
-        if not self.is_recording:
-            return True
+        if not self.is_capturing:
+            self.logger.warning("Tentative de récupération de données audio sans capture active")
+            return np.zeros(int(AUDIO_SAMPLE_RATE * duration_ms / 1000), dtype=np.int16)
         
+        # Calculer combien de chunks correspondent à la durée demandée
+        bytes_per_sample = 2  # Pour format paInt16
+        samples_per_chunk = AUDIO_CHUNK_SIZE
+        chunks_needed = int((AUDIO_SAMPLE_RATE * duration_ms / 1000) / samples_per_chunk) + 1
+        
+        # Récupérer les chunks du buffer
+        audio_chunks = []
+        chunk_count = 0
+        
+        # Copier le buffer pour éviter les problèmes de concurrence
+        buffer_copy = []
+        while not self.audio_buffer.empty() and chunk_count < chunks_needed:
+            try:
+                buffer_copy.append(self.audio_buffer.get())
+                chunk_count += 1
+            except queue.Empty:
+                break
+        
+        # Remettre les chunks dans le buffer
+        for chunk in buffer_copy:
+            self.audio_buffer.put(chunk)
+            audio_chunks.append(chunk)
+        
+        if not audio_chunks:
+            self.logger.warning("Aucune donnée audio disponible")
+            return np.zeros(int(AUDIO_SAMPLE_RATE * duration_ms / 1000), dtype=np.int16)
+        
+        # Convertir les chunks en un tableau numpy
         try:
-            if self.stream:
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = None
+            # Convertir les bytes en tableau numpy
+            audio_data = np.frombuffer(b''.join(audio_chunks), dtype=np.int16)
             
-            self.is_recording = False
-            self.logger.info("Capture audio arrêtée")
-            return True
+            # Limiter à la durée demandée
+            max_samples = int(AUDIO_SAMPLE_RATE * duration_ms / 1000)
+            if len(audio_data) > max_samples:
+                audio_data = audio_data[-max_samples:]
+            
+            return audio_data
         except Exception as e:
-            self.logger.error(f"Erreur lors de l'arrêt de la capture audio: {str(e)}")
-            return False
+            self.logger.error(f"Erreur lors de la conversion des données audio: {str(e)}")
+            return np.zeros(int(AUDIO_SAMPLE_RATE * duration_ms / 1000), dtype=np.int16)
     
-    def close(self):
+    def analyze_audio_levels(self, duration_ms=1000):
         """
-        Ferme PyAudio et libère les ressources
+        Analyse les niveaux audio et retourne des métriques.
+        
+        Args:
+            duration_ms (int): Durée des données audio à analyser en millisecondes
+        
+        Returns:
+            dict: Métriques audio (rms, peak, etc.)
+        """
+        audio_data = self.get_audio_data(duration_ms)
+        
+        if len(audio_data) == 0:
+            return {
+                'rms': 0,
+                'peak': 0,
+                'average': 0,
+                'has_audio': False
+            }
+        
+        # Normaliser entre -1 et 1
+        audio_normalized = audio_data.astype(np.float32) / 32768.0
+        
+        # Calculer les métriques
+        rms = np.sqrt(np.mean(np.square(audio_normalized)))
+        peak = np.max(np.abs(audio_normalized))
+        average = np.mean(np.abs(audio_normalized))
+        
+        # Déterminer s'il y a du son significatif
+        has_audio = rms > 0.01  # Seuil arbitraire à ajuster selon les besoins
+        
+        return {
+            'rms': float(rms),
+            'peak': float(peak),
+            'average': float(average),
+            'has_audio': has_audio
+        }
+    
+    def __del__(self):
+        """
+        Destructeur pour nettoyer les ressources.
         """
         self.stop_capture()
         
-        if self.p:
+        if self.audio:
             try:
-                self.p.terminate()
-                self.p = None
-                self.logger.info("PyAudio terminé et ressources libérées")
+                self.audio.terminate()
             except Exception as e:
-                self.logger.error(f"Erreur lors de la fermeture de PyAudio: {str(e)}")
-    
-    def get_audio_data(self, duration_ms=500):
-        """
-        Récupère les dernières données audio capturées
-        
-        Args:
-            duration_ms (int, optional): Durée de l'audio à récupérer en millisecondes. Défaut à 500.
-        
-        Returns:
-            dict: Données audio (métadonnées) et tableau numpy des échantillons audio
-        """
-        if not self.is_recording or not self.current_audio:
-            return None
-        
-        # Calculer le nombre d'échantillons correspondant à la durée demandée
-        n_samples = int(AUDIO_SAMPLE_RATE * duration_ms / 1000)
-        
-        # Récupérer les derniers échantillons du buffer
-        buffer_list = list(self.audio_buffer)
-        samples = buffer_list[-min(n_samples, len(buffer_list)):]
-        
-        # Si le buffer ne contient pas assez d'échantillons, compléter avec des zéros
-        if len(samples) < n_samples:
-            samples = [0] * (n_samples - len(samples)) + samples
-        
-        # Convertir en tableau numpy
-        audio_samples = np.array(samples, dtype=np.int16)
-        
-        # Combiner avec les métadonnées
-        result = self.current_audio.copy()
-        result['samples'] = audio_samples
-        
-        return result
-    
-    def save_audio_to_file(self, filename, duration_seconds=5):
-        """
-        Sauvegarde les dernières secondes d'audio capturé dans un fichier WAV
-        
-        Args:
-            filename (str): Chemin du fichier de sortie
-            duration_seconds (int, optional): Nombre de secondes à sauvegarder. Défaut à 5.
-        
-        Returns:
-            bool: True si la sauvegarde a réussi, False sinon
-        """
-        if not self.is_recording:
-            self.logger.warning("Impossible de sauvegarder: pas de capture audio en cours")
-            return False
-        
-        try:
-            # Calculer le nombre d'échantillons
-            n_samples = int(AUDIO_SAMPLE_RATE * duration_seconds)
-            
-            # Récupérer les derniers échantillons du buffer
-            buffer_list = list(self.audio_buffer)
-            samples = buffer_list[-min(n_samples, len(buffer_list)):]
-            
-            # Convertir en tableau numpy puis en bytes
-            audio_samples = np.array(samples, dtype=np.int16)
-            audio_bytes = audio_samples.tobytes()
-            
-            # Créer le répertoire de sortie si nécessaire
-            os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
-            
-            # Sauvegarder en WAV
-            with wave.open(filename, 'wb') as wf:
-                wf.setnchannels(AUDIO_CHANNELS)
-                wf.setsampwidth(self.p.get_sample_size(AUDIO_FORMAT))
-                wf.setframerate(AUDIO_SAMPLE_RATE)
-                wf.writeframes(audio_bytes)
-            
-            self.logger.info(f"Audio sauvegardé dans {filename} ({len(samples)/AUDIO_SAMPLE_RATE:.2f} secondes)")
-            return True
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la sauvegarde audio: {str(e)}")
-            return False
-    
-    def get_devices(self):
-        """
-        Récupère la liste des périphériques audio d'entrée disponibles
-        
-        Returns:
-            list: Liste des périphériques audio d'entrée
-        """
-        devices = []
-        
-        if not self.p:
-            self.initialize()
-        
-        try:
-            for i in range(self.p.get_device_count()):
-                dev_info = self.p.get_device_info_by_index(i)
-                if dev_info['maxInputChannels'] > 0:  # C'est un périphérique d'entrée
-                    devices.append({
-                        'index': i,
-                        'name': dev_info['name'],
-                        'channels': dev_info['maxInputChannels'],
-                        'default': (i == self.p.get_default_input_device_info()['index'])
-                    })
-            
-            return devices
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la récupération des périphériques: {str(e)}")
-            return []
+                if self.logger:
+                    self.logger.error(f"Erreur lors de la terminaison de PyAudio: {str(e)}")
