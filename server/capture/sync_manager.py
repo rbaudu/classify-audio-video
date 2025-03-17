@@ -89,6 +89,16 @@ class SyncManager:
             self.logger.error(f"Erreur lors du démarrage de la capture synchronisée: {str(e)}")
             return False
     
+    def start_capture(self):
+        """
+        Alias pour la méthode start() pour compatibilité avec les appels externes
+        
+        Returns:
+            bool: True si démarré avec succès, False sinon
+        """
+        self.logger.info("Appel à start_capture(), redirection vers start()")
+        return self.start()
+    
     def stop(self, timeout=2.0):
         """
         Arrête la capture synchronisée
@@ -324,3 +334,12 @@ class SyncManager:
             self.start()
         
         return result
+    
+    def is_running(self):
+        """
+        Indique si la capture est en cours
+        
+        Returns:
+            bool: True si la capture est en cours, False sinon
+        """
+        return self.is_running
