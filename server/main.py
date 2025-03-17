@@ -18,6 +18,7 @@ from server.capture.sync_manager import SyncManager
 from server.analysis.activity_classifier import ActivityClassifier
 from server.routes.api_routes import register_api_routes
 from server.routes.web_routes import register_web_routes
+from server.flask_app import create_app
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +57,8 @@ def init_app():
     # Initialisation du classificateur d'activités
     activity_classifier = ActivityClassifier(sync_manager=sync_manager)
     
-    # Obtenir le chemin absolu du projet
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    
-    # Création de l'app Flask
-    app = Flask(__name__, 
-                static_folder=os.path.join(root_dir, 'web', 'static'),
-                template_folder=os.path.join(root_dir, 'web', 'templates'))
+    # Création de l'app Flask avec notre module dédié
+    app = create_app()
     
     # Enregistrement des routes API
     register_api_routes(app, db_manager, sync_manager, activity_classifier)
