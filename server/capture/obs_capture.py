@@ -55,6 +55,7 @@ class OBSCapture:
             # Vérifier la connexion
             version = self.client.get_version()
             logger.info(f"Connecté à OBS avec succès")
+            logger.debug(f"Version OBS: {version.obs_version}, WebSocket: {version.obs_web_socket_version}")
             
             # Récupérer les sources disponibles
             self._get_sources()
@@ -68,41 +69,54 @@ class OBSCapture:
     def _get_sources(self):
         """Récupère les sources disponibles dans OBS"""
         if not self.connected or not self.client:
+            logger.error("Impossible de récupérer les sources: non connecté à OBS")
             return
         
-        # Essayer d'abord avec GetSourcesList (version plus ancienne d'OBS)
+        # Essayer d'abord avec GetSceneList pour obtenir les sources visibles
         try:
-            logger.info("Tentative de récupération des sources via GetSourcesList()")
-            sources_response = self.client.call(obsws.requests.GetSourcesList())
-            logger.info(f"Réponse de GetSourcesList(): {sources_response}")
+            logger.info("Tentative de récupération des scènes via GetSceneList()")
+            scenes_response = self.client.get_scene_list()
+            current_scene = scenes_response.current_program_scene
+            logger.info(f"Scène actuelle: {current_scene}")
             
-            sources = sources_response.get('sources', [])
+            # Lister toutes les scènes
+            logger.info(f"Scènes disponibles: {[scene.scene_name for scene in scenes_response.scenes]}")
             
-            # Filtrer les sources vidéo et média
-            self.video_sources = [source['name'] for source in sources if source.get('typeId') in ['dshow_input', 'v4l2_input']]
-            self.media_sources = [source['name'] for source in sources if source.get('typeId') in ['ffmpeg_source', 'vlc_source']]
-            
-            logger.info(f"Sources vidéo trouvées: {self.video_sources}")
-            logger.info(f"Sources média trouvées: {self.media_sources}")
-            
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
-            
-            # Essayer avec GetInputList() pour OBS 28+
+            # Lister les inputs (sources)
+            logger.info("Tentative de récupération des sources via GetInputList() (OBS 28+)")
             try:
-                logger.info("Tentative de récupération des sources via GetInputList() (OBS 28+)")
                 inputs_response = self.client.get_input_list()
-                logger.info(f"Sources récupérées via GetInputList(): {inputs_response.inputs}")
+                all_inputs = inputs_response.inputs
+                
+                logger.info(f"Toutes les sources disponibles: {[input_data['inputName'] + ' (' + input_data['inputKind'] + ')' for input_data in all_inputs]}")
                 
                 # Filtrer par type d'entrée pour OBS 28+
-                self.video_sources = [input_data['inputName'] for input_data in inputs_response.inputs if input_data.get('inputKind') in ['dshow_input', 'v4l2_input']]
-                self.media_sources = [input_data['inputName'] for input_data in inputs_response.inputs if input_data.get('inputKind') in ['ffmpeg_source', 'vlc_source']]
+                self.video_sources = [input_data['inputName'] for input_data in all_inputs if input_data.get('inputKind') in ['dshow_input', 'v4l2_input', 'video_capture_device', 'av_capture_input']]
+                self.media_sources = [input_data['inputName'] for input_data in all_inputs if input_data.get('inputKind') in ['ffmpeg_source', 'vlc_source', 'media_source']]
                 
-                logger.info(f"Sources vidéo trouvées (via GetInputList): {self.video_sources}")
-                logger.info(f"Sources média trouvées (via GetInputList): {self.media_sources}")
+                logger.info(f"Sources vidéo trouvées: {self.video_sources}")
+                logger.info(f"Sources média trouvées: {self.media_sources}")
                 
-            except Exception as inner_e:
-                logger.error(f"Erreur lors de la récupération des sources via GetInputList: {str(inner_e)}")
+                # Si aucune source vidéo n'est trouvée, essayons d'ajouter d'autres types potentiels
+                if not self.video_sources:
+                    logger.warning("Aucune source vidéo standard trouvée, recherche de sources alternatives...")
+                    
+                    # Inclure également 'game_capture', 'window_capture', 'screen_capture' comme sources vidéo potentielles
+                    for input_data in all_inputs:
+                        kind = input_data.get('inputKind', '')
+                        name = input_data.get('inputName', '')
+                        
+                        if kind in ['game_capture', 'window_capture', 'screen_capture', 'browser_source', 'image_source']:
+                            logger.info(f"Ajout de la source alternative: {name} ({kind})")
+                            self.video_sources.append(name)
+                
+                logger.info(f"Sources vidéo après inclusion des alternatives: {self.video_sources}")
+                
+            except Exception as e:
+                logger.error(f"Erreur lors de la récupération des sources via GetInputList: {str(e)}")
+        
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
     
     def capture_frame(self, source_name=None):
         """Capture une image d'une source OBS
@@ -127,7 +141,7 @@ class OBSCapture:
         
         try:
             # Capture d'écran de la source
-            logger.info(f"Tentative avec GetSourceScreenshot pour: {source_name}")
+            logger.debug(f"Tentative avec GetSourceScreenshot pour: {source_name}")
             
             screenshot = self.client.get_source_screenshot(
                 source_name=source_name,
@@ -163,6 +177,7 @@ class OBSCapture:
             
             # Essayer une méthode alternative pour OBS 28+
             try:
+                logger.debug(f"Tentative alternative avec GetSourceScreenshot pour: {source_name}")
                 screenshot = self.client.get_source_screenshot(
                     source_name=source_name,
                     img_format="jpg",
@@ -207,10 +222,20 @@ class OBSCapture:
         # Si aucune source n'est spécifiée, utiliser la première source vidéo
         if not source_name and self.video_sources:
             source_name = self.video_sources[0]
+            logger.info(f"Aucune source spécifiée, utilisation de: {source_name}")
         
         if not source_name:
             logger.error("Aucune source vidéo disponible pour la capture continue")
-            return
+            
+            # Tentative de récupération des sources à nouveau
+            logger.info("Tentative de récupération des sources vidéo à nouveau...")
+            self._get_sources()
+            
+            if self.video_sources:
+                source_name = self.video_sources[0]
+                logger.info(f"Source trouvée après nouvelle tentative: {source_name}")
+            else:
+                return
         
         self.is_capturing = True
         
@@ -232,8 +257,12 @@ class OBSCapture:
             interval (float): Intervalle entre les captures (secondes).
         """
         while self.is_capturing:
-            self.capture_frame(source_name)
-            time.sleep(interval)
+            frame = self.capture_frame(source_name)
+            if frame is None:
+                logger.warning(f"Échec de capture pour {source_name}, pause de 1s")
+                time.sleep(1.0)  # Pause plus longue en cas d'échec
+            else:
+                time.sleep(interval)
     
     def stop_capture(self):
         """Arrête la capture continue"""
