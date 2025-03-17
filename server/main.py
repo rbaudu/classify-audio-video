@@ -63,9 +63,8 @@ def create_app():
         # Obtenir une référence à OBS Capture depuis SyncManager
         obs_capture = app.sync_manager.obs_capture
         
-        # Initialiser le classificateur d'activité avec les bons arguments
-        # Adaptons notre approche aux dépendances disponibles
-        app.activity_classifier = ActivityClassifier()
+        # Initialiser le classificateur d'activité avec le SyncManager
+        app.activity_classifier = ActivityClassifier(capture_manager=app.sync_manager)
         
         # Initialiser le système de gestion d'erreurs
         logger.info("Initialisation du système de gestion d'erreurs")
@@ -87,8 +86,8 @@ def create_app():
         else:
             logger.error("Échec du démarrage de la capture synchronisée")
         
-        # Démarrer l'analyse périodique - Si cette ligne cause des erreurs, la commenter
-        # app.activity_classifier.start_periodic_analysis(app.sync_manager)
+        # Démarrer l'analyse périodique avec le sync_manager correctement associé
+        app.activity_classifier.start_periodic_analysis(sync_manager=app.sync_manager, interval=60)
         
         return app
         
