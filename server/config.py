@@ -14,7 +14,7 @@ class Config:
     # Configuration OBS
     OBS_HOST = os.environ.get('OBS_HOST') or 'localhost'
     OBS_PORT = int(os.environ.get('OBS_PORT') or 4455)
-    OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or 'Me2Fai800h1VwthV'
+    OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or ''  # empty if no authentication 
     
     # Configuration des sources OBS
     VIDEO_SOURCE_NAME = os.environ.get('VIDEO_SOURCE_NAME') or 'camera'  # Modifié pour correspondre à votre source caméra
