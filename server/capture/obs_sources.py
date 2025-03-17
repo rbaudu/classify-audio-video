@@ -219,39 +219,43 @@ class OBSSourcesMixin:
             try:
                 # Appel à l'API OBS pour récupérer une capture d'écran de la source
                 self.logger.info(f"Tentative de capture d'image pour la source: {source_name}")
-                response = self.ws.call(requests.TakeSourceScreenshot(
-                    sourceName=source_name,
-                    embedPictureFormat="png",
-                    width=640,  # Résolution réduite pour des performances meilleures
-                    height=360
-                ))
                 
-                # Récupérer les données de l'image en base64
-                # CORRECTION: Vérification de la présence de 'img' dans la réponse
-                if hasattr(response, 'img'):
-                    img_data = response.img
-                elif hasattr(response, 'imageData'):
-                    img_data = response.imageData
-                else:
-                    # Si ni 'img' ni 'imageData' n'existent, loguer le contenu de la réponse
-                    response_attrs = dir(response)
-                    self.logger.error(f"Format de réponse inattendu pour TakeSourceScreenshot. Attributs disponibles: {response_attrs}")
+                # Méthode 1: Utiliser TakeSourceScreenshot (OBS 28+)
+                try:
+                    response = self.ws.call(requests.TakeSourceScreenshot(
+                        sourceName=source_name,
+                        embedPictureFormat="png",
+                        width=640,
+                        height=360
+                    ))
                     
-                    # Essayons de récupérer toutes les données possibles pour le débogage
-                    for attr in response_attrs:
-                        if not attr.startswith('_') and not callable(getattr(response, attr)):
-                            self.logger.error(f"Attribut {attr}: {getattr(response, attr)}")
+                    # OBS 31.x peut ne pas renvoyer les attributs 'img' ou 'imageData'
+                    # Essayons de lire la réponse directement depuis data
+                    img_data = None
                     
-                    if self._handle_capture_error("Données d'image manquantes"):
-                        self.logger.error("Réponse d'image sans attribut 'img' ou 'imageData' reçue d'OBS")
+                    if hasattr(response, 'data') and isinstance(response.data, dict) and 'imageData' in response.data:
+                        img_data = response.data['imageData']
+                    elif hasattr(response, 'img'):
+                        img_data = response.img
+                    elif hasattr(response, 'imageData'):
+                        img_data = response.imageData
+                    else:
+                        # Si on ne trouve pas les données d'image, on lève une exception pour passer à la méthode alternative
+                        raise Exception("Format de réponse non reconnu pour TakeSourceScreenshot")
+                
+                except Exception as e:
+                    # Méthode 2: Essayer avec GetSourceScreenshot (OBS 31.x)
+                    self.logger.info(f"Tentative alternative avec GetSourceScreenshot pour : {source_name}")
+                    response = self.ws.call(requests.GetSourceScreenshot(
+                        sourceName=source_name,
+                        imageFormat="png",
+                        imageWidth=640,
+                        imageHeight=360
+                    ))
+                    img_data = response.getImageData() if hasattr(response, 'getImageData') else None
                     
-                    # Retourner la dernière frame réussie si disponible
-                    if self.last_successful_frame is not None:
-                        return self.last_successful_frame
-                    
-                    # Générer une image noire de remplacement pour éviter les erreurs en aval
-                    dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
-                    return dummy_frame
+                    if not img_data and hasattr(response, 'data') and isinstance(response.data, dict):
+                        img_data = response.data.get('imageData')
                 
                 # Vérifier si img_data est valide
                 if not img_data:
@@ -267,7 +271,7 @@ class OBSSourcesMixin:
                     return dummy_frame
                 
                 # Supprimer le préfixe data:image/png;base64,
-                if "base64," in img_data:
+                if isinstance(img_data, str) and "base64," in img_data:
                     img_data = img_data.split("base64,")[1]
                 
                 # Décoder l'image
