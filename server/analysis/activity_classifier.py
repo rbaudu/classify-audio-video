@@ -37,6 +37,8 @@ class ActivityClassifier:
         self.db_manager = db_manager
         self.analysis_thread = None
         self.stop_analysis = False
+        self.last_activity = None
+        self.last_activity_time = 0
         
         # Utiliser le model_path passé ou celui de la configuration
         self.model_path = model_path or MODEL_PATH
@@ -70,6 +72,11 @@ class ActivityClassifier:
             # Vérifier si les dépendances sont disponibles
             if self.capture_manager is None:
                 logger.warning("Gestionnaire de capture non disponible")
+                # Simuler des caractéristiques pour les tests ou utiliser la dernière activité connue
+                if self.last_activity and time.time() - self.last_activity_time < 60:  # Valide pendant 1 minute
+                    logger.info("Utilisation de la dernière activité connue (pas de capture disponible)")
+                    return self.last_activity
+                
                 # Simuler des caractéristiques pour les tests
                 video_features = {
                     'features': {
@@ -90,6 +97,8 @@ class ActivityClassifier:
                 
                 # Classifier l'activité
                 result = self.classify_activity(video_features, audio_features)
+                self.last_activity = result
+                self.last_activity_time = time.time()
                 return result
             
             # Récupérer les données synchronisées
@@ -97,22 +106,61 @@ class ActivityClassifier:
             
             if sync_data is None:
                 logger.warning("Impossible de récupérer les données synchronisées")
+                # Utiliser la dernière activité connue comme fallback
+                if self.last_activity and time.time() - self.last_activity_time < 60:  # Valide pendant 1 minute
+                    logger.info("Utilisation de la dernière activité connue (échec de synchronisation)")
+                    return self.last_activity
                 return None
             
             # Utiliser les données vidéo et audio déjà traitées
             video_features = sync_data.get('video', {}).get('processed')
             audio_features = sync_data.get('audio', {}).get('processed')
             
-            if video_features is None or audio_features is None:
-                logger.warning("Données vidéo ou audio traitées manquantes")
+            if video_features is None and audio_features is None:
+                logger.warning("Données vidéo et audio traitées manquantes")
+                # Utiliser la dernière activité connue comme fallback
+                if self.last_activity and time.time() - self.last_activity_time < 60:
+                    logger.info("Utilisation de la dernière activité connue (pas de données)")
+                    return self.last_activity
                 return None
+            
+            # Si l'une des caractéristiques est manquante, générer des valeurs par défaut
+            if video_features is None:
+                logger.warning("Données vidéo manquantes, utilisation de valeurs par défaut")
+                video_features = {
+                    'features': {
+                        'motion_percent': 5,
+                        'skin_percent': 0,
+                        'hsv_means': (0, 0, 0)
+                    }
+                }
+            
+            if audio_features is None:
+                logger.warning("Données audio manquantes, utilisation de valeurs par défaut")
+                audio_features = {
+                    'features': {
+                        'rms_level': 0.1,
+                        'zero_crossing_rate': 0.01,
+                        'dominant_frequency': 0,
+                        'mid_freq_ratio': 0.3
+                    }
+                }
             
             # Classifier l'activité
             result = self.classify_activity(video_features, audio_features)
             
+            # Sauvegarder comme dernière activité connue
+            if result:
+                self.last_activity = result
+                self.last_activity_time = time.time()
+            
             return result
         except Exception as e:
             logger.error(f"Erreur lors de l'analyse de l'activité courante: {str(e)}")
+            # Utiliser la dernière activité connue comme fallback en cas d'erreur
+            if self.last_activity and time.time() - self.last_activity_time < 60:
+                logger.info("Utilisation de la dernière activité connue (suite à une erreur)")
+                return self.last_activity
             return None
     
     def start_periodic_analysis(self, sync_manager=None, interval=300):
@@ -125,6 +173,7 @@ class ActivityClassifier:
         """
         if sync_manager is not None:
             self.capture_manager = sync_manager
+            logger.info(f"SyncManager fourni pour l'analyse périodique: {sync_manager}")
         
         # Arrêter l'analyse en cours si elle existe
         self.stop_analysis = True
@@ -140,7 +189,7 @@ class ActivityClassifier:
         )
         self.analysis_thread.start()
         
-        logger.info("Boucle d'analyse démarrée")
+        logger.info(f"Boucle d'analyse démarrée avec intervalle de {interval} secondes")
     
     def _analysis_loop(self, interval):
         """
@@ -166,6 +215,8 @@ class ActivityClassifier:
                         )
                     
                     logger.info(f"Activité détectée: {result['activity']} (confiance: {result['confidence']:.2f})")
+                else:
+                    logger.warning("Aucune activité détectée lors de cette analyse")
                 
                 # Attendre l'intervalle spécifié, mais en vérifiant régulièrement 
                 # pour permettre un arrêt plus rapide
@@ -198,11 +249,22 @@ class ActivityClassifier:
         Returns:
             dict: Résultat de la classification
         """
-        if video_features is None or audio_features is None:
-            logger.warning("Caractéristiques vidéo ou audio manquantes")
+        if video_features is None and audio_features is None:
+            logger.warning("Caractéristiques vidéo et audio manquantes")
             return None
         
         try:
+            # S'assurer que les caractéristiques ont la bonne structure
+            if not isinstance(video_features, dict):
+                video_features = {'features': {}}
+            if 'features' not in video_features:
+                video_features['features'] = {}
+            
+            if not isinstance(audio_features, dict):
+                audio_features = {'features': {}}
+            if 'features' not in audio_features:
+                audio_features['features'] = {}
+            
             # Détermination de l'activité
             if self.rule_based:
                 activity = self._rule_based_classification(video_features, audio_features)
@@ -227,7 +289,14 @@ class ActivityClassifier:
             return result
         except Exception as e:
             logger.error(f"Erreur lors de la classification: {str(e)}")
-            return None
+            # Mode de secours minimal
+            return {
+                'activity': 'inactif',
+                'confidence': 0.5,
+                'confidence_scores': {cls: 0.1 for cls in self.activity_classes},
+                'timestamp': int(time.time()),
+                'features': {}
+            }
     
     def _rule_based_classification(self, video_data, audio_data):
         """
