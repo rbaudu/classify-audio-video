@@ -227,7 +227,31 @@ class OBSSourcesMixin:
                 ))
                 
                 # Récupérer les données de l'image en base64
-                img_data = response.getImg()
+                # CORRECTION: Vérification de la présence de 'img' dans la réponse
+                if hasattr(response, 'img'):
+                    img_data = response.img
+                elif hasattr(response, 'imageData'):
+                    img_data = response.imageData
+                else:
+                    # Si ni 'img' ni 'imageData' n'existent, loguer le contenu de la réponse
+                    response_attrs = dir(response)
+                    self.logger.error(f"Format de réponse inattendu pour TakeSourceScreenshot. Attributs disponibles: {response_attrs}")
+                    
+                    # Essayons de récupérer toutes les données possibles pour le débogage
+                    for attr in response_attrs:
+                        if not attr.startswith('_') and not callable(getattr(response, attr)):
+                            self.logger.error(f"Attribut {attr}: {getattr(response, attr)}")
+                    
+                    if self._handle_capture_error("Données d'image manquantes"):
+                        self.logger.error("Réponse d'image sans attribut 'img' ou 'imageData' reçue d'OBS")
+                    
+                    # Retourner la dernière frame réussie si disponible
+                    if self.last_successful_frame is not None:
+                        return self.last_successful_frame
+                    
+                    # Générer une image noire de remplacement pour éviter les erreurs en aval
+                    dummy_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+                    return dummy_frame
                 
                 # Vérifier si img_data est valide
                 if not img_data:
