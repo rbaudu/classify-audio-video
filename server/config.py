@@ -17,7 +17,7 @@ class Config:
     OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or 'Me2Fai800h1VwthV'
     
     # Configuration des sources OBS
-    VIDEO_SOURCE_NAME = os.environ.get('VIDEO_SOURCE_NAME') or 'Default Video Source'  # Modifié par défaut pour correspondre à votre source actuelle
+    VIDEO_SOURCE_NAME = os.environ.get('VIDEO_SOURCE_NAME') or 'camera'  # Modifié pour correspondre à votre source caméra
     AUDIO_SOURCE_NAME = os.environ.get('AUDIO_SOURCE_NAME') or 'Default Audio Source'
     
     # Configuration des chemins
