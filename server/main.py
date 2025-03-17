@@ -81,7 +81,8 @@ def create_app():
         
         # Vérifier que la capture a démarré correctement
         time.sleep(0.1)  # Laisser le temps de démarrer
-        if app.sync_manager.is_running():
+        # Vérification modifiée pour éviter l'erreur
+        if app.sync_manager._is_running:
             logger.info("Capture synchronisée démarrée avec succès")
         else:
             logger.error("Échec du démarrage de la capture synchronisée")
