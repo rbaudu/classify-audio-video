@@ -3,6 +3,7 @@ import os
 import sys
 import signal
 import time
+import threading
 from flask import Flask
 
 # Configuration de base du logging
@@ -40,47 +41,64 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 def create_app():
-    # Configurer les chemins
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-    analysis_dir = os.path.join(data_dir, 'analysis')
-    
-    # Créer les répertoires s'ils n'existent pas
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(analysis_dir, exist_ok=True)
-    
-    # Initialiser les composants
-    db_manager = DBManager()
-    external_service = ExternalServiceClient()
-    
-    # Initialiser le système de capture synchronisée
-    app.sync_manager = SyncManager()
-    
-    # Initialiser le classificateur d'activité
-    app.activity_classifier = ActivityClassifier(model_path=None)
-    
-    # Initialiser le système de gestion d'erreurs
-    logger.info("Initialisation du système de gestion d'erreurs")
-    init_error_system()
-    
-    # Enregistrer les routes
-    register_web_routes(app)
-    register_api_routes(app, app.sync_manager, app.activity_classifier, db_manager, analysis_dir)
-    register_video_routes(app, app.sync_manager)  # Nouvelle registration des routes vidéo
-    
-    # Démarrer la capture synchronisée
-    app.sync_manager.start_capture()
-    
-    # Vérifier que la capture a démarré correctement
-    time.sleep(0.1)  # Laisser le temps de démarrer
-    if app.sync_manager.is_running():
-        logger.info("Capture synchronisée démarrée avec succès")
-    else:
-        logger.error("Échec du démarrage de la capture synchronisée")
-    
-    # Démarrer l'analyse périodique
-    app.activity_classifier.start_periodic_analysis(app.sync_manager)
-    
-    return app
+    try:
+        # Configurer les chemins
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+        analysis_dir = os.path.join(data_dir, 'analysis')
+        
+        # Créer les répertoires s'ils n'existent pas
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(analysis_dir, exist_ok=True)
+        
+        # Initialiser les composants dans l'ordre
+        db_manager = DBManager()
+        external_service = ExternalServiceClient()
+        
+        # Initialiser le système de capture synchronisée
+        app.sync_manager = SyncManager()
+        
+        # Attendre que la capture soit initialisée
+        time.sleep(0.1)
+        
+        # Récupérer les références aux composants nécessaires pour ActivityClassifier
+        capture_manager = app.sync_manager.obs_capture
+        stream_processor = app.sync_manager.stream_processor
+        
+        # Initialiser le classificateur d'activité avec les arguments requis
+        app.activity_classifier = ActivityClassifier(
+            capture_manager=capture_manager,
+            stream_processor=stream_processor,
+            db_manager=db_manager,
+            model_path=None
+        )
+        
+        # Initialiser le système de gestion d'erreurs
+        logger.info("Initialisation du système de gestion d'erreurs")
+        init_error_system()
+        
+        # Enregistrer les routes
+        register_web_routes(app)
+        register_api_routes(app, app.sync_manager, app.activity_classifier, db_manager, analysis_dir)
+        register_video_routes(app, app.sync_manager)
+        
+        # Démarrer la capture synchronisée
+        app.sync_manager.start_capture()
+        
+        # Vérifier que la capture a démarré correctement
+        time.sleep(0.1)  # Laisser le temps de démarrer
+        if app.sync_manager.is_running():
+            logger.info("Capture synchronisée démarrée avec succès")
+        else:
+            logger.error("Échec du démarrage de la capture synchronisée")
+        
+        # Démarrer l'analyse périodique
+        app.activity_classifier.start_periodic_analysis(app.sync_manager)
+        
+        return app
+        
+    except Exception as e:
+        logger.error(f"Erreur lors de la création de l'application: {str(e)}")
+        raise
 
 def run_app():
     logger.info("Démarrage du serveur classify-audio-video...")
@@ -104,9 +122,10 @@ def start_server():
         logger.error(f"Erreur lors du démarrage du serveur: {str(e)}")
         return False
 
-# Ajout pour l'import manquant
-import threading
-
 if __name__ == '__main__':
-    app = create_app()
-    run_app()
+    try:
+        app = create_app()
+        run_app()
+    except Exception as e:
+        logger.critical(f"Erreur fatale lors du démarrage: {str(e)}")
+        sys.exit(1)
