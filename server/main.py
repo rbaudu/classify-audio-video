@@ -34,6 +34,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Événement global pour la gestion de l'arrêt
+stop_event = threading.Event()
+
 # Initialisation de l'application Flask
 app = Flask(__name__, 
            static_folder='../web/static',
@@ -41,7 +44,7 @@ app = Flask(__name__,
 
 # Initialisation des classes principales (avec gestion d'erreurs)
 try:
-    sync_manager = SyncManager()
+    sync_manager = SyncManager(stop_event=stop_event)
     stream_processor = StreamProcessor()
     db_manager = DBManager()
     activity_classifier = ActivityClassifier(sync_manager, stream_processor, db_manager)
@@ -54,6 +57,9 @@ except Exception as e:
 # Répertoire pour les analyses temporaires
 ANALYSIS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'analyses')
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
+
+# Variable de contrôle pour l'arrêt du serveur
+server_shutdown_requested = False
 
 # Gestionnaires d'erreurs Flask globaux
 @app.errorhandler(404)
@@ -116,6 +122,38 @@ def handle_exception(e):
         # Format HTML pour les routes web
         return app.send_static_file('500.html'), 500
 
+# Fonction pour arrêter proprement Flask
+def shutdown_flask():
+    """Fonction pour arrêter le serveur Flask depuis un gestionnaire de signal"""
+    global server_shutdown_requested
+    
+    if server_shutdown_requested:
+        return  # Éviter les appels multiples
+    
+    server_shutdown_requested = True
+    
+    # Utiliser le signal SIGTERM pour forcer l'arrêt de Flask après un délai si nécessaire
+    def emergency_shutdown():
+        time.sleep(5)  # Attendre 5 secondes pour l'arrêt propre
+        if not stop_event.is_set():
+            logger.critical("Arrêt d'urgence du serveur après délai d'attente")
+            os.kill(os.getpid(), signal.SIGKILL)  # Force l'arrêt
+    
+    # Démarrer un thread d'arrêt d'urgence
+    emergency = threading.Thread(target=emergency_shutdown)
+    emergency.daemon = True
+    emergency.start()
+    
+    logger.info("Demande d'arrêt du serveur Flask initiée")
+    try:
+        func = request.environ.get('werkzeug.server.shutdown')
+        if func is None:
+            raise RuntimeError('Non exécuté avec le serveur de développement Werkzeug')
+        func()
+        logger.info("Serveur Flask arrêté")
+    except Exception as e:
+        logger.error(f"Impossible d'arrêter proprement Flask: {e}")
+
 @handle_exceptions
 def shutdown_server():
     """
@@ -123,16 +161,21 @@ def shutdown_server():
     """
     logger.info("Arrêt du serveur en cours...")
     
+    # Signaler l'arrêt à tous les composants
+    stop_event.set()
+    
     try:
         # Arrêter la boucle d'analyse
-        stop_analysis_loop()
+        logger.info("Arrêt de la boucle d'analyse...")
+        stop_analysis_loop(timeout=3.0)
     except Exception as e:
         logger.error("Erreur lors de l'arrêt de la boucle d'analyse")
         log_exception(e)
     
     try:
         # Arrêter la capture synchronisée
-        sync_manager.stop()
+        logger.info("Arrêt de la capture synchronisée...")
+        sync_manager.stop(timeout=3.0)
     except Exception as e:
         logger.error("Erreur lors de l'arrêt de la capture synchronisée")
         log_exception(e)
@@ -144,11 +187,36 @@ def handle_signals(signum, frame):
     Gère les signaux SIGINT et SIGTERM pour un arrêt propre
     """
     logger.info(f"Signal {signum} reçu, arrêt en cours...")
+    
+    # Définir un timeout pour l'arrêt
+    MAX_SHUTDOWN_TIME = 10  # secondes
+    
+    # Démarrer un timer pour forcer l'arrêt si nécessaire
+    def force_exit():
+        logger.critical("Délai d'arrêt dépassé, arrêt forcé")
+        os._exit(1)  # Sortie forcée sans nettoyage
+    
+    timer = threading.Timer(MAX_SHUTDOWN_TIME, force_exit)
+    timer.daemon = True
+    timer.start()
+    
     try:
+        # Signaler l'arrêt global
+        stop_event.set()
+        
+        # Arrêter le serveur Flask
+        shutdown_flask()
+        
+        # Arrêter proprement les composants
         shutdown_server()
+        
+        # Annuler le timer si tout s'est bien passé
+        timer.cancel()
     except Exception as e:
         logger.critical("Erreur lors de l'arrêt propre du serveur")
         log_exception(e)
+    
+    # Sortir après l'arrêt propre
     sys.exit(0)
 
 @handle_exceptions
@@ -156,6 +224,9 @@ def start_server():
     """
     Démarre le serveur Flask et la boucle d'analyse
     """
+    # Réinitialiser l'événement d'arrêt
+    stop_event.clear()
+    
     # Enregistrer les gestionnaires de signaux
     signal.signal(signal.SIGINT, handle_signals)
     signal.signal(signal.SIGTERM, handle_signals)
