@@ -52,9 +52,9 @@ def fix_run_py():
         # 3. Améliorer le gestionnaire de signaux
         signal_handler_pattern = r'def signal_handler\(sig, frame\):[^}]*?shutdown_server\(\)'
         improved_handler = """def signal_handler(sig, frame):
-    """
+    \"\"\"
     Gestionnaire de signal pour CTRL+C (SIGINT) et SIGTERM
-    """
+    \"\"\"
     logger.info(f"Signal d'interruption reçu ({sig}). Arrêt du serveur...")
     
     # Permettre l'arrêt même si d'autres threads sont en cours
