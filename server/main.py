@@ -5,6 +5,7 @@ Module principal du serveur
 
 import logging
 import os
+import threading
 from flask import Flask
 
 # Import des modules internes
@@ -85,6 +86,9 @@ def init_app():
     # Création de l'app Flask avec notre module dédié
     app = create_app()
     
+    # Configuration Flask à partir de Config
+    app.debug = Config.DEBUG
+    
     # Enregistrement des routes API
     register_api_routes(app, db_manager, sync_manager, activity_classifier)
     
@@ -106,15 +110,26 @@ def start_app(app):
     sync_manager = app.config['SYNC_MANAGER']
     activity_classifier = app.config['ACTIVITY_CLASSIFIER']
     
-    # Démarrage de la capture
-    sync_manager.start()
+    # Démarrage de la capture dans un thread séparé pour ne pas bloquer le serveur Flask
+    def start_capture_thread():
+        try:
+            # Démarrage de la capture
+            sync_manager.start()
+            
+            # Démarrage de l'analyse périodique
+            activity_classifier.start_analysis_loop()
+            
+        except Exception as e:
+            logger.error(f"Erreur lors du démarrage de la capture: {e}")
     
-    # Démarrage de l'analyse périodique
-    activity_classifier.start_analysis_loop()
+    # Créer et démarrer le thread de capture
+    capture_thread = threading.Thread(target=start_capture_thread, daemon=True)
+    capture_thread.start()
     
     logger.info("Démarrage du serveur classify-audio-video...")
-    logger.info("Accédez à l'interface via http://localhost:5000")
+    logger.info(f"Accédez à l'interface via http://{Config.FLASK_HOST}:{Config.FLASK_PORT}")
     logger.info("Appuyez sur Ctrl+C pour arrêter le serveur")
     
     # Démarrage du serveur Flask
-    app.run(host=Config.FLASK_HOST, port=Config.FLASK_PORT, debug=Config.DEBUG)
+    # NB: N'utilisez pas threaded=True pour les tests, cela peut causer des problèmes de thread
+    app.run(host=Config.FLASK_HOST, port=Config.FLASK_PORT, debug=Config.DEBUG, use_reloader=False)
