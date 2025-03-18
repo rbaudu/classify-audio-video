@@ -55,7 +55,7 @@ def parse_arguments():
 
 def shutdown_server():
     """Arrête le serveur de manière propre"""
-    global app_instance, is_shutting_down
+    global app_instance, is_shutting_down, server_thread
     
     # Éviter les arrêts multiples
     if is_shutting_down:
@@ -82,9 +82,8 @@ def shutdown_server():
     
     logger.info("Arrêt du serveur terminé.")
     
-    # Sortir du programme (forcer la sortie)
-    # On utilise os._exit car sys.exit peut ne pas fonctionner avec certains threads
-    os._exit(0)
+    # Utiliser sys.exit au lieu de os._exit pour permettre aux ressources d'être libérées correctement
+    sys.exit(0)
 
 def signal_handler(sig, frame):
     """
@@ -167,7 +166,7 @@ if __name__ == "__main__":
         logger.info("Appuyez sur Ctrl+C pour arrêter le serveur")
         
         # Démarrer le serveur Flask dans un thread séparé
-        server_thread = threading.Thread(target=run_flask_app, args=(app_instance,), daemon=True)
+        server_thread = threading.Thread(target=run_flask_app, args=(app_instance,), daemon=False)
         server_thread.start()
         
         # Maintenir le thread principal en vie jusqu'à un CTRL+C ou une erreur
