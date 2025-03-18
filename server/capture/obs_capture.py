@@ -7,7 +7,9 @@ import logging
 import time
 import base64
 import io
-from PIL import Image
+import os
+import random
+from PIL import Image, ImageDraw, ImageFont
 import threading
 import obsws_python as obsws
 from obsws_python.error import OBSSDKError
@@ -37,6 +39,9 @@ class OBSCapture:
         self.frame_time = 0
         self.is_capturing = False
         self.capture_thread = None
+        
+        # Pour des images alternatives
+        self.test_image_counter = 0
         
         # Se connecter à OBS
         self._connect()
@@ -77,54 +82,167 @@ class OBSCapture:
         # Essayer d'abord avec GetSceneList pour obtenir les sources visibles
         try:
             logger.info("Tentative de récupération des scènes via GetSceneList()")
-            scenes_response = self.client.get_scene_list()
-            current_scene = scenes_response.current_program_scene
+            scene_list = self.client.get_scene_list()
+            
+            # Vérifier les attributs disponibles dans la réponse
+            # (la structure peut varier entre les versions d'OBS WebSocket)
+            if hasattr(scene_list, 'current_program_scene_name'):
+                current_scene = scene_list.current_program_scene_name
+            elif hasattr(scene_list, 'current_program_scene'):
+                current_scene = scene_list.current_program_scene
+            else:
+                # Récupérer l'attribut directement depuis le dictionnaire de données
+                response_data = scene_list.__dict__
+                logger.debug(f"Structure de GetSceneList: {response_data}")
+                
+                # Essayer différents noms d'attributs possibles
+                if 'current_program_scene_name' in response_data:
+                    current_scene = response_data['current_program_scene_name']
+                elif 'currentProgramSceneName' in response_data:
+                    current_scene = response_data['currentProgramSceneName']
+                else:
+                    # Mettre une valeur par défaut
+                    current_scene = "Unknown current scene"
+            
             logger.info(f"Scène actuelle: {current_scene}")
             
-            # Lister toutes les scènes
-            logger.info(f"Scènes disponibles: {[scene.scene_name for scene in scenes_response.scenes]}")
-            
-            # Lister les inputs (sources)
-            logger.info("Tentative de récupération des sources via GetInputList() (OBS 28+)")
+            # Lister les scènes
             try:
+                # Vérifier comment accéder aux scènes (structure peut varier)
+                if hasattr(scene_list, 'scenes'):
+                    scenes = scene_list.scenes
+                    scene_names = [scene.name if hasattr(scene, 'name') else 
+                                  scene.scene_name if hasattr(scene, 'scene_name') else 
+                                  str(scene) for scene in scenes]
+                else:
+                    scene_names = ["Unknown scenes"]
+                
+                logger.info(f"Scènes disponibles: {scene_names}")
+            except Exception as scene_e:
+                logger.warning(f"Erreur lors de l'accès aux noms de scènes: {scene_e}")
+            
+            # Obtenir les sources via GetInputList
+            try:
+                logger.info("Tentative de récupération des sources via GetInputList()")
                 inputs_response = self.client.get_input_list()
-                all_inputs = inputs_response.inputs
                 
-                logger.info(f"Toutes les sources disponibles: {[input_data['inputName'] + ' (' + input_data['inputKind'] + ')' for input_data in all_inputs]}")
+                # Vérifier la structure de la réponse
+                if hasattr(inputs_response, 'inputs'):
+                    all_inputs = inputs_response.inputs
+                else:
+                    logger.debug(f"Structure de GetInputList: {inputs_response.__dict__}")
+                    all_inputs = []
                 
-                # Filtrer par type d'entrée pour OBS 28+
-                self.video_sources = [input_data['inputName'] for input_data in all_inputs if input_data.get('inputKind') in ['dshow_input', 'v4l2_input', 'video_capture_device', 'av_capture_input']]
-                self.media_sources = [input_data['inputName'] for input_data in all_inputs if input_data.get('inputKind') in ['ffmpeg_source', 'vlc_source', 'media_source']]
-                
-                logger.info(f"Sources vidéo trouvées: {self.video_sources}")
-                logger.info(f"Sources média trouvées: {self.media_sources}")
-                
-                # Si aucune source vidéo n'est trouvée, essayons d'ajouter d'autres types potentiels
-                if not self.video_sources:
-                    logger.warning("Aucune source vidéo standard trouvée, recherche de sources alternatives...")
-                    
-                    # Inclure également 'game_capture', 'window_capture', 'screen_capture' comme sources vidéo potentielles
+                # Vérifier et filtrer les sources
+                if all_inputs:
+                    # Log toutes les sources pour le débogage
                     for input_data in all_inputs:
-                        kind = input_data.get('inputKind', '')
-                        name = input_data.get('inputName', '')
-                        
-                        if kind in ['game_capture', 'window_capture', 'screen_capture', 'browser_source', 'image_source']:
-                            logger.info(f"Ajout de la source alternative: {name} ({kind})")
-                            self.video_sources.append(name)
-                
-                logger.info(f"Sources vidéo après inclusion des alternatives: {self.video_sources}")
-                
-            except Exception as e:
-                logger.error(f"Erreur lors de la récupération des sources via GetInputList: {str(e)}")
-                
-                # Créer une source factice pour les tests
+                        if isinstance(input_data, dict):
+                            kind = input_data.get('inputKind', input_data.get('kind', 'unknown'))
+                            name = input_data.get('inputName', input_data.get('name', 'unknown'))
+                            logger.info(f"Source trouvée: {name} (type: {kind})")
+                    
+                    # Filtrer les sources vidéo et média
+                    video_types = ['dshow_input', 'v4l2_input', 'video_capture_device', 
+                                 'av_capture_input', 'game_capture', 'window_capture', 
+                                 'screen_capture', 'browser_source', 'image_source']
+                    
+                    media_types = ['ffmpeg_source', 'vlc_source', 'media_source']
+                    
+                    self.video_sources = []
+                    self.media_sources = []
+                    
+                    for input_data in all_inputs:
+                        if isinstance(input_data, dict):
+                            # Les noms des champs peuvent varier selon la version
+                            kind = input_data.get('inputKind', input_data.get('kind', ''))
+                            name = input_data.get('inputName', input_data.get('name', ''))
+                            
+                            if kind in video_types:
+                                self.video_sources.append(name)
+                            elif kind in media_types:
+                                self.media_sources.append(name)
+                    
+                    logger.info(f"Sources vidéo trouvées: {self.video_sources}")
+                    logger.info(f"Sources média trouvées: {self.media_sources}")
+                else:
+                    logger.warning("Aucune source trouvée via GetInputList()")
+            except Exception as input_e:
+                logger.error(f"Erreur lors de la récupération des inputs: {input_e}")
+            
+            # Si aucune source n'a été trouvée, utiliser une source de test
+            if not self.video_sources:
+                logger.warning("Aucune source vidéo trouvée, utilisation d'une source de test")
                 self.video_sources = ["Test Source"]
-                
+        
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des sources: {str(e)}")
-            
             # Créer une source factice pour les tests
             self.video_sources = ["Test Source"]
+    
+    def _create_test_image(self, source_name, width=640, height=480):
+        """Crée une image de test intéressante
+        
+        Args:
+            source_name (str): Nom de la source
+            width (int): Largeur de l'image
+            height (int): Hauteur de l'image
+            
+        Returns:
+            PIL.Image.Image: Image de test
+        """
+        # Incrémenter le compteur pour avoir des images différentes
+        self.test_image_counter += 1
+        
+        # Créer une image colorée
+        colors = [
+            (255, 0, 0),    # Rouge
+            (0, 255, 0),    # Vert
+            (0, 0, 255),    # Bleu
+            (255, 255, 0),  # Jaune
+            (255, 0, 255),  # Magenta
+            (0, 255, 255),  # Cyan
+        ]
+        
+        # Choisir une couleur de fond en fonction du compteur
+        bg_color = colors[self.test_image_counter % len(colors)]
+        
+        # Créer une image avec la couleur de fond
+        img = Image.new('RGB', (width, height), color=bg_color)
+        draw = ImageDraw.Draw(img)
+        
+        # Dessiner un motif
+        for i in range(0, width, 40):
+            draw.line([(i, 0), (i, height)], fill=(255, 255, 255), width=1)
+        
+        for i in range(0, height, 40):
+            draw.line([(0, i), (width, i)], fill=(255, 255, 255), width=1)
+        
+        # Dessiner des formes géométriques aléatoires
+        for _ in range(5):
+            x1 = random.randint(0, width)
+            y1 = random.randint(0, height)
+            x2 = random.randint(0, width)
+            y2 = random.randint(0, height)
+            
+            shape_color = colors[random.randint(0, len(colors)-1)]
+            
+            # Rectangle ou cercle
+            if random.choice([True, False]):
+                draw.rectangle([x1, y1, x2, y2], outline=shape_color, width=3)
+            else:
+                draw.ellipse([x1, y1, x2, y2], outline=shape_color, width=3)
+        
+        # Ajouter du texte
+        timestamp = time.strftime("%H:%M:%S")
+        draw.text((10, 10), f"Source: {source_name}", fill=(255, 255, 255))
+        draw.text((10, 30), f"Capture test #{self.test_image_counter}", fill=(255, 255, 255))
+        draw.text((10, 50), f"Temps: {timestamp}", fill=(255, 255, 255))
+        
+        # Ajouter une indication OBS
+        draw.text((width-150, 10), "OBS TEST MODE", fill=(255, 255, 255))
+        
+        return img
     
     def capture_frame(self, source_name=None):
         """Capture une image d'une source OBS
@@ -133,11 +251,11 @@ class OBSCapture:
             source_name (str, optional): Nom de la source à capturer. Par défaut None (utilise la première source disponible).
         
         Returns:
-            PIL.Image.Image: Image capturée, ou None si échec
+            PIL.Image.Image: Image capturée, ou image de test si échec
         """
         if not self.connected or not self.client:
             logger.error("Impossible de capturer une image: non connecté à OBS")
-            return None
+            return self._create_test_image("Non connecté", 640, 480)
         
         # Si aucune source n'est spécifiée, utiliser la première source vidéo
         if not source_name:
@@ -145,25 +263,69 @@ class OBSCapture:
                 source_name = self.video_sources[0]
             else:
                 logger.error("Aucune source vidéo disponible")
-                return None
+                return self._create_test_image("Aucune source", 640, 480)
         
         try:
-            # Capture d'écran de la source
-            logger.debug(f"Tentative avec GetSourceScreenshot pour: {source_name}")
+            # Capture d'écran de la source - Adapter selon API
+            logger.debug(f"Tentative de capture pour: {source_name}")
             
-            screenshot = self.client.get_source_screenshot(
-                source_name=source_name,
-                img_format="jpg",
-                width=640,
-                height=480
-            )
-            
-            # Décodage de l'image base64
-            if screenshot and hasattr(screenshot, 'img_data'):
-                img_data = screenshot.img_data
+            # La syntaxe varie selon la version d'OBS WebSocket
+            try:
+                # Essai avec sourceName (OBS 29+/27+)
+                screenshot = self.client.get_source_screenshot(
+                    sourceName=source_name,
+                    imageFormat="jpg",
+                    imageWidth=640,
+                    imageHeight=480
+                )
+            except Exception as e1:
+                logger.debug(f"Première tentative échouée: {e1}")
                 
+                try:
+                    # Essai avec source_name (autres versions)
+                    screenshot = self.client.get_source_screenshot(
+                        sourceName=source_name,
+                        imageFormat="jpg",
+                        width=640,
+                        height=480
+                    )
+                except Exception as e2:
+                    logger.debug(f"Deuxième tentative échouée: {e2}")
+                    
+                    try:
+                        # Essai avec méthode alternative
+                        screenshot = self.client.get_source_screenshot(
+                            sourceName=source_name,
+                            imageFormat="jpg"
+                        )
+                    except Exception as e3:
+                        logger.debug(f"Troisième tentative échouée: {e3}")
+                        raise Exception("Aucune méthode de capture ne fonctionne")
+            
+            # Traitement de la réponse - vérifier divers types de réponses possibles
+            img_data = None
+            
+            # Vérifier les attributs possibles où les données d'image pourraient se trouver
+            if hasattr(screenshot, 'img_data'):
+                img_data = screenshot.img_data
+            elif hasattr(screenshot, 'imageData'):
+                img_data = screenshot.imageData
+            elif hasattr(screenshot, 'image_data'):
+                img_data = screenshot.image_data
+            else:
+                # Essayer d'accéder directement aux attributs du dictionnaire
+                response_dict = screenshot.__dict__
+                logger.debug(f"Structure de la réponse: {response_dict}")
+                
+                for key in ['img_data', 'imageData', 'image_data', 'data']:
+                    if key in response_dict:
+                        img_data = response_dict[key]
+                        break
+            
+            # Si on a trouvé des données d'image
+            if img_data:
                 # Supprimer le préfixe data:image/jpg;base64, si présent
-                if ';base64,' in img_data:
+                if isinstance(img_data, str) and ';base64,' in img_data:
                     img_data = img_data.split(';base64,')[1]
                 
                 # Décoder l'image base64
@@ -177,52 +339,21 @@ class OBSCapture:
                 
                 return img
             else:
-                logger.warning(f"Capture d'écran non réussie pour {source_name}")
-                return None
-        
+                logger.warning(f"Capture d'écran réussie mais pas de données d'image pour {source_name}")
+                return self._create_test_image(source_name, 640, 480)
+                
         except Exception as e:
             logger.error(f"Erreur lors de la capture d'écran: {str(e)}")
             
-            # Essayer une méthode alternative pour OBS 28+
-            try:
-                logger.debug(f"Tentative alternative avec GetSourceScreenshot pour: {source_name}")
-                screenshot = self.client.get_source_screenshot(
-                    source_name=source_name,
-                    img_format="jpg",
-                    width=640,
-                    height=480,
-                    compression_quality=75
-                )
-                
-                # Traitement similaire à ci-dessus
-                if screenshot and hasattr(screenshot, 'img_data'):
-                    img_data = screenshot.img_data
-                    
-                    # Supprimer le préfixe data:image/jpg;base64, si présent
-                    if ';base64,' in img_data:
-                        img_data = img_data.split(';base64,')[1]
-                    
-                    # Décoder l'image base64
-                    img_bytes = base64.b64decode(img_data)
-                    img = Image.open(io.BytesIO(img_bytes))
-                    
-                    # Mettre à jour l'image courante
-                    with self.frame_lock:
-                        self.current_frame = img
-                        self.frame_time = time.time()
-                    
-                    return img
-                else:
-                    # Pour les tests, créer une image factice
-                    logger.warning(f"Creating dummy image for {source_name}")
-                    dummy_img = Image.new('RGB', (640, 480), color='black')
-                    return dummy_img
-            except Exception as inner_e:
-                logger.error(f"Erreur alternative lors de la capture d'écran: {str(inner_e)}")
-                # Pour les tests, créer une image factice
-                logger.warning(f"Creating dummy image after errors for {source_name}")
-                dummy_img = Image.new('RGB', (640, 480), color='black')
-                return dummy_img
+            # Générer une image de test plutôt qu'une image noire
+            img = self._create_test_image(source_name, 640, 480)
+            
+            # Mettre à jour l'image courante
+            with self.frame_lock:
+                self.current_frame = img
+                self.frame_time = time.time()
+            
+            return img
     
     def start_capture(self, source_name=None, interval=0.1):
         """Démarre la capture continue en arrière-plan
@@ -274,8 +405,12 @@ class OBSCapture:
             interval (float): Intervalle entre les captures (secondes).
         """
         while self.is_capturing:
-            self.capture_frame(source_name)
-            time.sleep(interval)
+            try:
+                self.capture_frame(source_name)
+                time.sleep(interval)
+            except Exception as e:
+                logger.error(f"Erreur dans la boucle de capture: {e}")
+                time.sleep(1)  # Pause plus longue en cas d'erreur
     
     def stop_capture(self):
         """Arrête la capture continue"""
@@ -294,6 +429,11 @@ class OBSCapture:
             tuple: (PIL.Image.Image, float) Image et timestamp, ou (None, 0) si aucune image
         """
         with self.frame_lock:
+            if self.current_frame is None:
+                # Créer une image de test si aucune image n'est disponible
+                frame = self._create_test_image("Current Frame", 640, 480)
+                timestamp = time.time()
+                return frame, timestamp
             return self.current_frame, self.frame_time
     
     def get_frame_as_jpeg(self, quality=85):
@@ -305,18 +445,12 @@ class OBSCapture:
         Returns:
             bytes: Données JPEG ou None si pas d'image
         """
-        with self.frame_lock:
-            if self.current_frame is None:
-                # Capturer une nouvelle image si possible
-                if self.connected and self.video_sources:
-                    frame = self.capture_frame(self.video_sources[0])
-                    if frame is None:
-                        return None
-                else:
-                    return None
-            else:
-                frame = self.current_frame
-                
+        frame, _ = self.get_current_frame()
+        
+        if frame is None:
+            # Si aucune image n'est disponible, créer une image de test
+            frame = self._create_test_image("JPEG Fallback", 640, 480)
+        
         # Convertir en JPEG
         img_buffer = io.BytesIO()
         frame.save(img_buffer, format='JPEG', quality=quality)
