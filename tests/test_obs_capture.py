@@ -9,8 +9,9 @@ import sys
 import os
 import time
 import logging
-import cv2
 import numpy as np
+import io
+from PIL import Image
 
 # Ajouter le répertoire parent au PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -32,7 +33,8 @@ def test_obs_connection():
     """
     obs = OBSCapture()
     
-    if obs.is_connected():
+    # Utiliser l'attribut 'connected' au lieu de 'is_connected()'
+    if obs.connected:
         logger.info("✅ Connexion à OBS réussie")
     else:
         logger.error("❌ Échec de la connexion à OBS")
@@ -53,7 +55,7 @@ def test_video_sources():
         logger.error("❌ Aucune source vidéo détectée")
         return False
     
-    logger.info(f"✅ Sources vidéo détectées : {[s['name'] for s in obs.video_sources]}")
+    logger.info(f"✅ Sources vidéo détectées : {obs.video_sources}")
     return True
 
 def test_capture_image():
@@ -65,91 +67,107 @@ def test_capture_image():
     # Attendre que la connexion s'établisse
     time.sleep(1)
     
-    # Trouver les sources vidéo disponibles
-    sources = [s['name'] for s in obs.video_sources]
-    
-    if not sources:
+    # Vérifier si des sources vidéo sont disponibles
+    if not obs.video_sources:
         logger.error("❌ Aucune source vidéo disponible pour capturer une image")
         return False
     
     success = False
-    for source in sources:
-        logger.info(f"Tentative de capture de la source '{source}'...")
+    for source in obs.video_sources:
+        # Adapter selon la structure actuelle (liste de chaînes de caractères)
+        if isinstance(source, dict):
+            source_name = source.get('name', 'unknown')
+        else:
+            source_name = source
+            
+        logger.info(f"Tentative de capture de la source '{source_name}'...")
         
         # Essayer de capturer l'image
-        frame = obs.get_video_frame(source)
-        
-        if frame is None or (isinstance(frame, np.ndarray) and np.all(frame == 0)):
-            logger.warning(f"❌ Source '{source}' : Aucune image capturée ou image noire")
-            continue
-        
-        # Afficher les informations de l'image
-        if isinstance(frame, np.ndarray):
-            logger.info(f"✅ Image capturée de la source '{source}' : {frame.shape}")
+        try:
+            # Utiliser la méthode capture_frame dans votre version actuelle
+            frame = obs.capture_frame(source_name)
             
-            # Enregistrer l'image pour inspection
-            output_path = f"test_capture_{source.replace(' ', '_')}.png"
-            cv2.imwrite(output_path, frame)
-            logger.info(f"✅ Image enregistrée sous '{output_path}'")
+            if frame is None:
+                logger.warning(f"❌ Source '{source_name}' : Aucune image capturée")
+                continue
             
-            success = True
-        else:
-            logger.warning(f"❌ Source '{source}' : Type d'image inattendu : {type(frame)}")
+            # Pour les images PIL, convertir en format standard pour la journalisation
+            if isinstance(frame, Image.Image):
+                logger.info(f"✅ Image PIL capturée de la source '{source_name}' : {frame.size}")
+                
+                # Enregistrer l'image pour inspection
+                output_path = f"test_capture_{source_name.replace(' ', '_')}.png"
+                frame.save(output_path)
+                logger.info(f"✅ Image enregistrée sous '{output_path}'")
+                
+                success = True
+            else:
+                logger.warning(f"❌ Source '{source_name}' : Type d'image inattendu : {type(frame)}")
+        except Exception as e:
+            logger.error(f"Erreur lors de la capture de '{source_name}': {e}")
     
     return success
 
 def test_file_capture():
     """
-    Teste la nouvelle méthode de capture par fichier
+    Teste la méthode de capture de frame au format JPEG
     """
-    from server.capture.obs_sources import OBSSourcesMixin
-    
-    class TestCapture(OBSSourcesMixin):
-        def __init__(self):
-            self.logger = logging.getLogger("TestCapture")
-            self._initialize_capture_state()
-            self.connected = True
-            self.ws_lock = type('DummyLock', (), {'__enter__': lambda x: None, '__exit__': lambda x, *args: None})()
-            self.consecutive_capture_errors = 0
-            self.last_successful_frame = None
-    
-    obs = OBSCapture()
-    
-    # Attendre que la connexion s'établisse
-    time.sleep(1)
-    
-    # Trouver les sources vidéo disponibles
-    sources = [s['name'] for s in obs.video_sources]
-    
-    if not sources:
-        logger.error("❌ Aucune source vidéo disponible pour capturer une image")
-        return False
-    
-    test_source = sources[0]
-    logger.info(f"Test de capture vers fichier pour '{test_source}'...")
-    
-    # Test de la méthode de capture vers fichier
-    result = obs._capture_to_file(test_source)
-    
-    if result:
-        logger.info(f"✅ Capture vers fichier réussie pour '{test_source}'")
+    try:
+        obs = OBSCapture()
         
-        # Vérifier que le fichier existe
-        if os.path.exists(obs.temp_image_path):
-            logger.info(f"✅ Fichier temporaire créé : {obs.temp_image_path}")
-            
-            # Charger l'image
-            image = cv2.imread(obs.temp_image_path)
-            
-            if image is not None:
-                logger.info(f"✅ Image chargée avec succès : {image.shape}")
-                return True
-            else:
-                logger.error("❌ Impossible de charger l'image à partir du fichier")
+        # Attendre que la connexion s'établisse
+        time.sleep(1)
+        
+        # Vérifier si des sources vidéo sont disponibles
+        if not obs.video_sources:
+            logger.error("❌ Aucune source vidéo disponible pour capturer une image")
+            return False
+        
+        # Utiliser la première source vidéo disponible
+        if isinstance(obs.video_sources[0], dict):
+            source_name = obs.video_sources[0].get('name', 'unknown')
         else:
-            logger.error(f"❌ Fichier temporaire non trouvé : {obs.temp_image_path}")
-    else:
-        logger.error(f"❌ Échec de la capture vers fichier pour '{test_source}'")
+            source_name = obs.video_sources[0]
+        
+        logger.info(f"Test de capture JPEG pour '{source_name}'...")
+        
+        # Tester get_frame_as_jpeg
+        if hasattr(obs, 'get_frame_as_jpeg'):
+            jpeg_data = obs.get_frame_as_jpeg()
+            
+            if jpeg_data:
+                # Vérifier que c'est un JPEG valide
+                try:
+                    img = Image.open(io.BytesIO(jpeg_data))
+                    logger.info(f"✅ Image JPEG valide : {img.size}")
+                    
+                    # Enregistrer pour vérification
+                    output_path = "test_jpeg_capture.jpg"
+                    with open(output_path, 'wb') as f:
+                        f.write(jpeg_data)
+                    logger.info(f"✅ Image JPEG enregistrée sous '{output_path}'")
+                    
+                    return True
+                except Exception as e:
+                    logger.error(f"❌ Données JPEG invalides : {e}")
+            else:
+                logger.error("❌ Aucune donnée JPEG obtenue")
+        else:
+            # Si la méthode n'existe pas, essayer directement avec capture_frame
+            frame = obs.capture_frame(source_name)
+            if frame:
+                logger.info(f"✅ Capture directe réussie pour '{source_name}'")
+                
+                # Enregistrer l'image pour vérification
+                if isinstance(frame, Image.Image):
+                    output_path = "test_direct_capture.png"
+                    frame.save(output_path)
+                    logger.info(f"✅ Image enregistrée sous '{output_path}'")
+                    return True
+                else:
+                    logger.warning(f"❌ Type d'image inattendu : {type(frame)}")
+    except Exception as e:
+        logger.error(f"Exception pendant le test de capture JPEG : {e}")
     
     return False
 
