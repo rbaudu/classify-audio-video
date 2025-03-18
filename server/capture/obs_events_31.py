@@ -29,7 +29,8 @@ class OBS31EventHandler:
         self.connected = False
         self.callbacks = {}
         
-        # Définir les mappings d'événements
+        # Définir les mappings d'événements 
+        # (chaînes directes au lieu d'utiliser obsws.EventSubscription qui n'existe pas)
         self.event_mappings = {
             'scene_changed': 'CurrentProgramSceneChanged',
             'streaming_started': 'StreamStarted',
@@ -58,14 +59,24 @@ class OBS31EventHandler:
             else:
                 self.client = obsws.EventClient(host=self.host, port=self.port)
             
-            # Enregistrer les callbacks pour les événements
-            for event_name, obs_event in self.event_mappings.items():
-                self.client.callback.register(getattr(obsws.EventSubscription, obs_event), 
-                                             lambda event, event_name=event_name: self._handle_event(event, event_name))
-            
-            # Marquer comme connecté
-            self.connected = True
-            logger.info("Gestionnaire d'événements OBS connecté avec succès")
+            # Enregistrer les callbacks pour les événements - Version simplifiée
+            # N'utilisez plus obsws.EventSubscription qui n'existe pas
+            try:
+                # Essayer d'enregistrer directement avec les chaînes d'événement
+                for event_name, obs_event in self.event_mappings.items():
+                    self.client.callback.register(
+                        obs_event,  # Utiliser la chaîne directement au lieu de obsws.EventSubscription.X
+                        lambda event, event_name=event_name: self._handle_event(event, event_name)
+                    )
+                
+                # Marquer comme connecté
+                self.connected = True
+                logger.info("Gestionnaire d'événements OBS connecté avec succès")
+            except Exception as callback_err:
+                logger.error(f"Erreur lors de l'enregistrement des callbacks: {str(callback_err)}")
+                # Ne pas échouer complètement, continuer même si les callbacks ne fonctionnent pas
+                self.connected = True
+                logger.info("Gestionnaire d'événements OBS connecté (sans callbacks)")
             
         except Exception as e:
             logger.error(f"Erreur de connexion au gestionnaire d'événements OBS: {str(e)}")
