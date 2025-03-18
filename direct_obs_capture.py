@@ -73,34 +73,60 @@ def main():
         if hasattr(screenshot, '__dict__'):
             logger.info(f"Attributs disponibles: {list(screenshot.__dict__.keys())}")
             
-            # Vérifier les attributs courants pour les données d'image
-            for attr in ['imageData', 'img_data', 'data']:
-                if hasattr(screenshot, attr):
-                    img_data = getattr(screenshot, attr)
-                    logger.info(f"Attribut '{attr}' trouvé, longueur: {len(str(img_data))}")
+            # Vérifier dans image_data (basé sur votre log précédent)
+            if hasattr(screenshot, 'image_data'):
+                img_data = screenshot.image_data
+                logger.info(f"Attribut 'image_data' trouvé, type: {type(img_data)}")
+                
+                # Enregistrer les données (si c'est une chaîne base64)
+                if isinstance(img_data, str):
+                    logger.info(f"Les premières caractères de l'image: {img_data[:30]}")
                     
-                    # Enregistrer les données (si c'est une chaîne base64)
-                    if isinstance(img_data, str) and ';base64,' in img_data:
-                        logger.info("Données au format base64 trouvées")
-                        
-                        import base64
-                        import io
-                        from PIL import Image
-                        
-                        # Extraire les données base64
+                    import base64
+                    import io
+                    from PIL import Image
+                    
+                    # Vérifier s'il y a un préfixe base64 à enlever
+                    if ';base64,' in img_data:
+                        logger.info("Format avec préfixe base64 détecté")
                         img_data = img_data.split(';base64,')[1]
+                    
+                    # Décoder et sauvegarder
+                    try:
+                        img_bytes = base64.b64decode(img_data)
+                        img = Image.open(io.BytesIO(img_bytes))
                         
-                        # Décoder et sauvegarder
+                        output_path = f"direct_capture_{source_name}.png"
+                        img.save(output_path)
+                        logger.info(f"✅ Image enregistrée sous: {output_path}")
+                        return True
+                    except Exception as e:
+                        logger.error(f"Erreur lors du décodage/enregistrement: {e}")
+                else:
+                    logger.error(f"image_data n'est pas une chaîne mais un {type(img_data)}")
+            else:
+                # Parcourir tous les attributs à la recherche de données d'image
+                for attr_name, attr_value in screenshot.__dict__.items():
+                    if isinstance(attr_value, str) and len(attr_value) > 100:
+                        logger.info(f"Attribut potentiel d'image trouvé: {attr_name}")
+                        # Essayer de décoder
                         try:
-                            img_bytes = base64.b64decode(img_data)
+                            if ';base64,' in attr_value:
+                                attr_value = attr_value.split(';base64,')[1]
+                            
+                            import base64
+                            import io
+                            from PIL import Image
+                            
+                            img_bytes = base64.b64decode(attr_value)
                             img = Image.open(io.BytesIO(img_bytes))
                             
-                            output_path = f"direct_capture_{source_name}.png"
+                            output_path = f"direct_capture_{attr_name}_{source_name}.png"
                             img.save(output_path)
                             logger.info(f"✅ Image enregistrée sous: {output_path}")
                             return True
                         except Exception as e:
-                            logger.error(f"Erreur lors du décodage/enregistrement: {e}")
+                            logger.error(f"Erreur de décodage pour l'attribut {attr_name}: {e}")
         
         logger.error("❌ Capture d'écran échouée ou format inattendu")
         return False
