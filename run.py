@@ -5,6 +5,8 @@ import logging
 import sys
 import os
 import argparse
+import signal
+import threading
 from server.main import init_app, start_app
 from server.config import Config
 
@@ -16,6 +18,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Variable globale pour l'application Flask
+app_instance = None
 
 def parse_arguments():
     """Parse les arguments de la ligne de commande"""
@@ -44,8 +49,47 @@ def parse_arguments():
     
     return parser.parse_args()
 
+def signal_handler(sig, frame):
+    """
+    Gestionnaire de signal pour CTRL+C (SIGINT)
+    """
+    global app_instance
+    
+    logger.info("Signal d'interruption (CTRL+C) reçu. Arrêt du serveur...")
+    
+    # Fermer manuellement toutes les connexions et threads
+    if app_instance:
+        # Récupérer les objets importants
+        try:
+            sync_manager = app_instance.config.get('SYNC_MANAGER')
+            if sync_manager:
+                logger.info("Arrêt du gestionnaire de synchronisation...")
+                sync_manager.stop()
+            
+            activity_classifier = app_instance.config.get('ACTIVITY_CLASSIFIER')
+            if activity_classifier and hasattr(activity_classifier, 'stop_analysis_loop'):
+                logger.info("Arrêt du classificateur d'activité...")
+                activity_classifier.stop_analysis_loop()
+        except Exception as e:
+            logger.error(f"Erreur lors de l'arrêt des composants: {e}")
+    
+    # Arrêter tous les threads démons
+    logger.info("Arrêt des threads en cours...")
+    for thread in threading.enumerate():
+        if thread != threading.current_thread() and thread.daemon:
+            logger.info(f"Arrêt du thread: {thread.name}")
+            # On ne peut pas arrêter directement un thread, mais on peut essayer
+            # d'interrompre ses opérations potentiellement bloquantes
+    
+    logger.info("Arrêt du programme.")
+    sys.exit(0)
+
 if __name__ == "__main__":
     try:
+        # Enregistrer le gestionnaire de signal pour CTRL+C
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
         # Analyser les arguments de la ligne de commande
         args = parse_arguments()
         
@@ -78,25 +122,30 @@ if __name__ == "__main__":
             logger.error(f"Le dossier des templates n'existe pas: {web_templates_dir}")
         
         logger.info("Initialisation de l'application...")
-        app = init_app()
+        app_instance = init_app()
         
         # Afficher la configuration des dossiers de Flask
-        logger.info(f"Flask static folder: {app.static_folder}")
-        logger.info(f"Flask template folder: {app.template_folder}")
+        logger.info(f"Flask static folder: {app_instance.static_folder}")
+        logger.info(f"Flask template folder: {app_instance.template_folder}")
         
         # Vérifier si les dossiers existent
-        if os.path.exists(app.template_folder):
+        if os.path.exists(app_instance.template_folder):
             logger.info(f"Le dossier de templates configuré dans Flask existe.")
         else:
             logger.error(f"Le dossier de templates configuré dans Flask n'existe pas!")
             
-        if os.path.exists(app.static_folder):
+        if os.path.exists(app_instance.static_folder):
             logger.info(f"Le dossier statique configuré dans Flask existe.")
         else:
             logger.error(f"Le dossier statique configuré dans Flask n'existe pas!")
             
-        start_app(app)
+        # Démarrer l'application
+        logger.info("Démarrage de l'application...")
+        start_app(app_instance)
+        
     except KeyboardInterrupt:
+        # Normalement, ceci ne devrait pas être appelé avec le gestionnaire de signal,
+        # mais nous le gardons comme secours
         logger.info("Arrêt du serveur demandé par l'utilisateur")
         sys.exit(0)
     except Exception as e:
