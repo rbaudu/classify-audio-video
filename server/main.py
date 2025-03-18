@@ -6,6 +6,7 @@ Module principal du serveur
 import logging
 import os
 import threading
+import time
 from flask import Flask
 
 # Import des modules internes
@@ -88,6 +89,7 @@ def init_app():
     
     # Configuration Flask à partir de Config
     app.debug = Config.DEBUG
+    app.secret_key = Config.SECRET_KEY
     
     # Enregistrement des routes API
     register_api_routes(app, db_manager, sync_manager, activity_classifier)
@@ -104,32 +106,23 @@ def init_app():
     return app
 
 def start_app(app):
-    """Démarre l'application Flask et la capture"""
+    """Démarre les composants de l'application (capture, sync, etc.) sans démarrer Flask"""
     
     # Récupération des objets depuis le contexte de l'application
     sync_manager = app.config['SYNC_MANAGER']
     activity_classifier = app.config['ACTIVITY_CLASSIFIER']
     
-    # Démarrage de la capture dans un thread séparé pour ne pas bloquer le serveur Flask
-    def start_capture_thread():
-        try:
-            # Démarrage de la capture
-            sync_manager.start()
-            
-            # Démarrage de l'analyse périodique
-            activity_classifier.start_analysis_loop()
-            
-        except Exception as e:
-            logger.error(f"Erreur lors du démarrage de la capture: {e}")
-    
-    # Créer et démarrer le thread de capture
-    capture_thread = threading.Thread(target=start_capture_thread, daemon=True)
-    capture_thread.start()
-    
-    logger.info("Démarrage du serveur classify-audio-video...")
-    logger.info(f"Accédez à l'interface via http://{Config.FLASK_HOST}:{Config.FLASK_PORT}")
-    logger.info("Appuyez sur Ctrl+C pour arrêter le serveur")
-    
-    # Démarrage du serveur Flask
-    # NB: N'utilisez pas threaded=True pour les tests, cela peut causer des problèmes de thread
-    app.run(host=Config.FLASK_HOST, port=Config.FLASK_PORT, debug=Config.DEBUG, use_reloader=False)
+    try:
+        # Démarrage de la capture
+        logger.info("Démarrage du gestionnaire de synchronisation...")
+        sync_manager.start()
+        
+        # Démarrage de l'analyse périodique
+        logger.info("Démarrage du classificateur d'activité...")
+        activity_classifier.start_analysis_loop()
+        
+        logger.info("Tous les composants ont été démarrés avec succès")
+        
+    except Exception as e:
+        logger.error(f"Erreur lors du démarrage des composants: {e}")
+        raise
