@@ -5,6 +5,16 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 
 ## Nouveautés
 
+### Support pour OBS 31.0.2 (Mars 2025)
+La dernière mise à jour ajoute la compatibilité avec OBS 31.0.2 et son API WebSocket intégrée :
+
+- **Classe OBS31Capture** : Nouvelle classe optimisée pour capturer des images depuis OBS 31.0.2+ via WebSocket
+- **Compatibilité OBS native** : Plus besoin d'installer le plugin WebSocket externe pour OBS 31.0.2+
+- **Mécanisme de fallback** : Option pour utiliser des images de test si la capture échoue, garantissant la continuité de l'application
+- **Scripts de diagnostic** : Outils pour explorer l'API WebSocket et tester la capture
+
+Voir la [Documentation spécifique pour OBS 31.0.2](README_OBS31.md) pour plus de détails sur cette fonctionnalité.
+
 ### Architecture JavaScript modulaire (Mars 2025)
 La dernière mise à jour introduit une architecture JavaScript modulaire pour améliorer la maintenabilité et les performances :
 
@@ -80,6 +90,7 @@ Un système robuste de gestion d'erreurs a été implémenté pour améliorer la
 ## Fonctionnalités principales
 
 - **Capture vidéo depuis OBS** : Connexion à OBS Studio via websocket pour recevoir les flux vidéo en temps réel
+- **Support pour OBS 31.0.2+** : Compatibilité avec le WebSocket intégré d'OBS 31.0.2 et versions ultérieures
 - **Capture audio via PyAudio** : Capture audio directe depuis le microphone ou autre périphérique audio
 - **Synchronisation audio/vidéo** : Alignement temporel des flux audio et vidéo
 - **Analyse avancée** : Traitement des flux pour extraire des caractéristiques pertinentes (mouvements, sons, présence humaine)
@@ -108,6 +119,27 @@ La documentation complète est divisée en plusieurs sections pour une meilleure
 - [Dépannage](docs/TROUBLESHOOTING.md) - Solutions aux problèmes courants
 - [Développement et extension](docs/DEVELOPMENT.md) - Guide pour étendre l'application
 - [Architecture JavaScript](docs/JS_ARCHITECTURE.md) - Détails sur l'architecture modulaire JavaScript
+- [Support OBS 31.0.2+](README_OBS31.md) - Guide pour utiliser l'application avec OBS 31.0.2 et plus
+
+## Installation rapide
+
+Pour installer et configurer l'application avec les dernières fonctionnalités :
+
+```bash
+# Cloner le dépôt
+git clone https://github.com/rbaudu/classify-audio-video.git
+cd classify-audio-video
+
+# Installer les dépendances
+python install_requirements.py
+
+# Tester la compatibilité avec OBS 31.0.2 (si vous utilisez cette version d'OBS)
+python tests/test_obs_31_api.py
+python tests/test_obs_31_capture.py
+
+# Démarrer l'application
+python server.py
+```
 
 ## Contribution
 
