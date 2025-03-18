@@ -9,6 +9,7 @@ import base64
 import io
 import os
 import random
+import traceback
 from PIL import Image, ImageDraw, ImageFont
 import threading
 import obsws_python as obsws
@@ -63,7 +64,7 @@ class OBSCapture:
             # Vérifier la connexion
             version = self.client.get_version()
             logger.info(f"Connecté à OBS avec succès")
-            logger.debug(f"Version OBS: {version.obs_version}, WebSocket: {version.obs_web_socket_version}")
+            logger.info(f"Version OBS: {version.obs_version}, WebSocket: {version.obs_web_socket_version}")
             
             # Marquer comme connecté avant d'appeler _get_sources
             self.connected = True
@@ -299,6 +300,7 @@ class OBSCapture:
         
         # Tentative 1: Méthode pour OBS 31.0+ (utilisée dans les logs d'erreur)
         try:
+            logger.info("Tentative 1: Méthode directe avec obsreq (OBS 31.0+)")
             # Méthode exacte comme vue dans les logs
             from obsws_python import requests as obsreq
             screenshot_request = obsreq.GetSourceScreenshot(
@@ -307,20 +309,24 @@ class OBSCapture:
                 imageWidth=640,
                 imageHeight=480
             )
+            logger.info(f"Requête obsreq: {screenshot_request.__dict__}")
             screenshot = self.client.call(screenshot_request)
+            logger.info(f"Réponse obtenue: {type(screenshot)}")
             
             # Extraire l'image
             if hasattr(screenshot, 'imageData'):
                 img_data = screenshot.imageData
+                logger.info("Attribut 'imageData' trouvé dans la réponse")
             else:
                 # Si ce n'est pas directement accessible, essayer les autres propriétés
                 for attr in ['img_data', 'image_data', 'data']:
                     if hasattr(screenshot, attr):
                         img_data = getattr(screenshot, attr)
+                        logger.info(f"Attribut '{attr}' trouvé dans la réponse")
                         break
                 else:
                     # Si aucun des attributs attendus n'est trouvé
-                    logger.debug(f"Structure de la réponse OBS 31.0+: {screenshot.__dict__}")
+                    logger.error(f"Structure de la réponse OBS 31.0+: {screenshot.__dict__}")
                     raise ValueError("Structure de réponse inattendue pour OBS 31.0+")
             
             if img_data:
@@ -337,12 +343,15 @@ class OBSCapture:
                     self.current_frame = img
                     self.frame_time = time.time()
                 
+                logger.info("Méthode 1 (OBS 31.0+) réussie")
                 return img
         except Exception as e:
-            logger.debug(f"Méthode OBS 31.0+ échouée: {e}")
+            logger.error(f"Méthode OBS 31.0+ échouée: {e}")
+            logger.error(f"Traceback OBS 31.0+: {traceback.format_exc()}")
         
         # Tentative 2: Méthode alternative pour OBS 30.x
         try:
+            logger.info("Tentative 2: Méthode avec get_source_screenshot et sourceName (OBS 30.x)")
             screenshot = self.client.get_source_screenshot(
                 sourceName=source_name,
                 imageFormat="png",
@@ -350,11 +359,14 @@ class OBSCapture:
                 imageHeight=480
             )
             
+            logger.info(f"Réponse obtenue: {type(screenshot)}")
+            
             # Extraction similaire à celle de la tentative 1
             img_data = None
             for attr in ['imageData', 'img_data', 'image_data']:
                 if hasattr(screenshot, attr):
                     img_data = getattr(screenshot, attr)
+                    logger.info(f"Attribut '{attr}' trouvé dans la réponse")
                     break
             
             if not img_data and hasattr(screenshot, '__dict__'):
@@ -362,6 +374,7 @@ class OBSCapture:
                 for key in ['imageData', 'img_data', 'image_data', 'data']:
                     if key in screenshot.__dict__:
                         img_data = screenshot.__dict__[key]
+                        logger.info(f"Clé '{key}' trouvée dans le dictionnaire de réponse")
                         break
             
             if img_data:
@@ -378,12 +391,15 @@ class OBSCapture:
                     self.current_frame = img
                     self.frame_time = time.time()
                 
+                logger.info("Méthode 2 (OBS 30.x) réussie")
                 return img
         except Exception as e:
-            logger.debug(f"Méthode OBS 30.x échouée: {e}")
+            logger.error(f"Méthode OBS 30.x échouée: {e}")
+            logger.error(f"Traceback OBS 30.x: {traceback.format_exc()}")
         
         # Tentative 3: Méthode pour OBS 28.x/29.x
         try:
+            logger.info("Tentative 3: Méthode avec get_source_screenshot et source_name (OBS 28.x/29.x)")
             screenshot = self.client.get_source_screenshot(
                 source_name=source_name,
                 img_format="png",
@@ -391,15 +407,19 @@ class OBSCapture:
                 height=480
             )
             
+            logger.info(f"Réponse obtenue: {type(screenshot)}")
+            
             # Extraire les données de l'image
             img_data = None
             if hasattr(screenshot, 'img_data'):
                 img_data = screenshot.img_data
+                logger.info("Attribut 'img_data' trouvé dans la réponse")
             elif hasattr(screenshot, '__dict__'):
                 # Essayer d'accéder directement aux attributs du dictionnaire
                 for key in ['img_data', 'imageData', 'image_data', 'data']:
                     if key in screenshot.__dict__:
                         img_data = screenshot.__dict__[key]
+                        logger.info(f"Clé '{key}' trouvée dans le dictionnaire de réponse")
                         break
             
             if img_data:
@@ -416,23 +436,32 @@ class OBSCapture:
                     self.current_frame = img
                     self.frame_time = time.time()
                 
+                logger.info("Méthode 3 (OBS 28.x/29.x) réussie")
                 return img
         except Exception as e:
-            logger.debug(f"Méthode OBS 28.x/29.x échouée: {e}")
+            logger.error(f"Méthode OBS 28.x/29.x échouée: {e}")
+            logger.error(f"Traceback OBS 28.x/29.x: {traceback.format_exc()}")
         
         # Tentative 4: Approche minimale (dernière tentative)
         try:
+            logger.info("Tentative 4: Approche minimale")
+            
             # Essai avec les options minimales
             screenshot = None
             try:
+                logger.info("Tentative 4.1: get_source_screenshot avec sourceName")
                 screenshot = self.client.get_source_screenshot(sourceName=source_name)
-            except Exception:
+            except Exception as e:
+                logger.error(f"Tentative 4.1 échouée: {e}")
                 try:
+                    logger.info("Tentative 4.2: get_source_screenshot avec source_name")
                     screenshot = self.client.get_source_screenshot(source_name=source_name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Tentative 4.2 échouée: {e}")
             
             if screenshot:
+                logger.info(f"Réponse obtenue: {type(screenshot)}")
+                
                 # Tenter d'extraire les données d'image
                 img_data = None
                 
@@ -441,6 +470,7 @@ class OBSCapture:
                     for key in ['imageData', 'img_data', 'image_data', 'data']:
                         if key in screenshot.__dict__:
                             img_data = screenshot.__dict__[key]
+                            logger.info(f"Clé '{key}' trouvée dans le dictionnaire de réponse")
                             break
                 
                 if img_data:
@@ -457,9 +487,11 @@ class OBSCapture:
                         self.current_frame = img
                         self.frame_time = time.time()
                     
+                    logger.info("Méthode 4 (minimale) réussie")
                     return img
         except Exception as e:
-            logger.debug(f"Méthode minimale échouée: {e}")
+            logger.error(f"Méthode minimale échouée: {e}")
+            logger.error(f"Traceback méthode minimale: {traceback.format_exc()}")
         
         # Si aucune des méthodes n'a fonctionné
         logger.error(f"Échec de toutes les méthodes de capture pour {source_name}")
