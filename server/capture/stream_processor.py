@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Processeur de flux audio et vidéo
+Compatible avec OBS31Capture et OBSCapture
 """
 
 import logging
