@@ -4,7 +4,9 @@
 import logging
 import sys
 import os
+import argparse
 from server.main import init_app, start_app
+from server.config import Config
 
 # Configuration du logging
 logging.basicConfig(
@@ -15,8 +17,49 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+def parse_arguments():
+    """Parse les arguments de la ligne de commande"""
+    parser = argparse.ArgumentParser(description='Serveur de classification d\'activité avec analyse audio/vidéo')
+    
+    # Options de configuration OBS
+    parser.add_argument('--obs-version', choices=['31', 'legacy'], default='31',
+                      help='Version d\'OBS à utiliser (31 pour OBS 31.0.2+, legacy pour versions antérieures)')
+    
+    parser.add_argument('--use-adapter', choices=['true', 'false'], default='true',
+                      help='Utiliser l\'adaptateur OBS31Adapter (true) ou directement OBS31Capture (false)')
+    
+    # Ajout d'options pour l'hôte/port OBS
+    parser.add_argument('--obs-host', default=Config.OBS_HOST,
+                      help=f'Hôte OBS WebSocket (défaut: {Config.OBS_HOST})')
+    
+    parser.add_argument('--obs-port', type=int, default=Config.OBS_PORT,
+                      help=f'Port OBS WebSocket (défaut: {Config.OBS_PORT})')
+    
+    # Options de configuration Flask
+    parser.add_argument('--flask-host', default=Config.FLASK_HOST,
+                      help=f'Hôte du serveur Flask (défaut: {Config.FLASK_HOST})')
+    
+    parser.add_argument('--flask-port', type=int, default=Config.FLASK_PORT,
+                      help=f'Port du serveur Flask (défaut: {Config.FLASK_PORT})')
+    
+    return parser.parse_args()
+
 if __name__ == "__main__":
     try:
+        # Analyser les arguments de la ligne de commande
+        args = parse_arguments()
+        
+        # Mettre à jour la configuration selon les arguments
+        os.environ['USE_OBS_31'] = 'true' if args.obs_version == '31' else 'false'
+        os.environ['USE_OBS_ADAPTER'] = args.use_adapter
+        os.environ['OBS_HOST'] = args.obs_host
+        os.environ['OBS_PORT'] = str(args.obs_port)
+        os.environ['FLASK_HOST'] = args.flask_host
+        os.environ['FLASK_PORT'] = str(args.flask_port)
+        
+        # Afficher la configuration OBS
+        logger.info(f"Configuration OBS: version={args.obs_version}, adapter={args.use_adapter}, host={args.obs_host}, port={args.obs_port}")
+        
         # Affichage du chemin de travail actuel pour le débogage
         current_dir = os.path.abspath(os.getcwd())
         logger.info(f"Répertoire de travail actuel: {current_dir}")
