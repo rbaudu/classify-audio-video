@@ -423,6 +423,12 @@ class OBS31Capture:
                 else:
                     return None
             
+            # CORRECTION: Convertir l'image en mode RGB si elle est en RGBA
+            # le format JPEG ne prend pas en charge le canal alpha
+            if frame.mode == 'RGBA':
+                logger.info("Conversion de l'image RGBA en RGB pour le format JPEG")
+                frame = frame.convert('RGB')
+            
             # Convertir en JPEG
             img_buffer = io.BytesIO()
             frame.save(img_buffer, format='JPEG', quality=quality)
