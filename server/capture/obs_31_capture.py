@@ -273,6 +273,9 @@ class OBS31Capture:
             elif hasattr(screenshot, 'data'):
                 img_data = screenshot.data
                 logger.info("Attribut 'data' trouvé")
+            elif hasattr(screenshot, 'image_data'):
+                img_data = screenshot.image_data
+                logger.info("Attribut 'image_data' trouvé")
             else:
                 # Vérifier directement les attributs disponibles
                 if hasattr(screenshot, '__dict__'):
@@ -406,7 +409,13 @@ class OBS31Capture:
             bytes: Données JPEG ou None si pas d'image
         """
         try:
+            # Vérifier d'abord si nous avons une image capturée
             frame, _ = self.get_current_frame()
+            
+            # Si nous n'avons pas d'image capturée, essayons d'en capturer une
+            if frame is None and self.video_sources:
+                logger.info("Pas d'image courante, tentative de capture...")
+                frame = self.capture_frame(self.video_sources[0])
             
             if frame is None:
                 if self.use_test_images:
