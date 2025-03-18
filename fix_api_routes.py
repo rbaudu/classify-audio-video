@@ -85,7 +85,7 @@ def fix_api_routes():
     # Routes API de secours pour les appels fréquents
     @app.route('/api/current-activity', methods=['GET', 'HEAD'])
     def current_activity_fallback():
-        """Route de secours pour l'activité courante"""
+        \"\"\"Route de secours pour l'activité courante\"\"\"
         response = {
             'status': 'success',
             'activity': 'inactif',  # Valeur par défaut
@@ -97,7 +97,7 @@ def fix_api_routes():
     
     @app.route('/api/video-status', methods=['GET'])
     def video_status_fallback():
-        """Route de secours pour le statut vidéo"""
+        \"\"\"Route de secours pour le statut vidéo\"\"\"
         response = {
             'status': 'success',
             'available': False,
@@ -107,7 +107,7 @@ def fix_api_routes():
     
     @app.route('/api/video-snapshot', methods=['GET'])
     def video_snapshot_fallback():
-        """Route de secours pour les snapshots vidéo"""
+        \"\"\"Route de secours pour les snapshots vidéo\"\"\"
         # Créer une image vide avec un message
         from PIL import Image, ImageDraw, ImageFont
         import io
@@ -136,7 +136,7 @@ def fix_api_routes():
     
     @app.route('/api/activities', methods=['GET'])
     def activities_fallback():
-        """Route de secours pour l'historique des activités"""
+        \"\"\"Route de secours pour l'historique des activités\"\"\"
         response = {
             'status': 'success',
             'activities': [],
