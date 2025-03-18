@@ -43,6 +43,9 @@ class OBSCapture:
         # Pour des images alternatives
         self.test_image_counter = 0
         
+        # Mode de fallback (si True, utilise des images de test en cas d'échec)
+        self.use_test_images = False
+        
         # Se connecter à OBS
         self._connect()
     
@@ -280,7 +283,9 @@ class OBSCapture:
         """
         if not self.connected or not self.client:
             logger.error("Impossible de capturer une image: non connecté à OBS")
-            return self._create_test_image("Non connecté", 640, 480)
+            if self.use_test_images:
+                return self._create_test_image("Non connecté", 640, 480)
+            return None
         
         # Si aucune source n'est spécifiée, utiliser la première source vidéo
         if not source_name:
@@ -288,121 +293,180 @@ class OBSCapture:
                 source_name = self.video_sources[0]
             else:
                 logger.error("Aucune source vidéo disponible")
-                return self._create_test_image("Aucune source", 640, 480)
+                if self.use_test_images:
+                    return self._create_test_image("Aucune source", 640, 480)
+                return None
         
-        # Capture d'écran de la source - Méthode directe pour OBS 30+
+        # Tentative 1: Méthode pour OBS 31.0+ (utilisée dans les logs d'erreur)
         try:
-            logger.debug(f"Tentative de capture pour: {source_name}")
+            # Méthode exacte comme vue dans les logs
+            from obsws_python import requests as obsreq
+            screenshot_request = obsreq.GetSourceScreenshot(
+                sourceName=source_name,
+                imageFormat="png",
+                imageWidth=640,
+                imageHeight=480
+            )
+            screenshot = self.client.call(screenshot_request)
             
-            # Méthode pour OBS 30+
-            try:
-                screenshot = self.client.get_source_screenshot(
-                    source_name=source_name,
-                    image_format="png",
-                    image_width=640,
-                    image_height=480
-                )
-                
-                # Extrait l'image des données
-                if hasattr(screenshot, 'image_data'):
-                    img_data = screenshot.image_data
-                elif hasattr(screenshot, 'img_data'):
-                    img_data = screenshot.img_data
+            # Extraire l'image
+            if hasattr(screenshot, 'imageData'):
+                img_data = screenshot.imageData
+            else:
+                # Si ce n'est pas directement accessible, essayer les autres propriétés
+                for attr in ['img_data', 'image_data', 'data']:
+                    if hasattr(screenshot, attr):
+                        img_data = getattr(screenshot, attr)
+                        break
                 else:
-                    # Essayer d'accéder directement aux attributs du dictionnaire
-                    response_dict = screenshot.__dict__
-                    if 'image_data' in response_dict:
-                        img_data = response_dict['image_data']
-                    elif 'img_data' in response_dict:
-                        img_data = response_dict['img_data']
-                    elif 'imageData' in response_dict:
-                        img_data = response_dict['imageData']
-                    else:
-                        # Si aucun attribut n'est trouvé, passer au bloc catch
-                        raise ValueError("Attribut d'image introuvable dans la réponse")
-                
-                # Traitement de l'image
-                if img_data:
-                    # Supprimer le préfixe data:image/png;base64, si présent
-                    if isinstance(img_data, str) and ';base64,' in img_data:
-                        img_data = img_data.split(';base64,')[1]
-                    
-                    # Décoder l'image base64
-                    img_bytes = base64.b64decode(img_data)
-                    img = Image.open(io.BytesIO(img_bytes))
-                    
-                    # Mettre à jour l'image courante
-                    with self.frame_lock:
-                        self.current_frame = img
-                        self.frame_time = time.time()
-                    
-                    return img
-            except Exception as e:
-                logger.debug(f"Première méthode échouée: {e}")
-                # Continuer vers la méthode alternativeù
-                
-            # Méthode alternative pour les versions précédentes d'OBS
-            try:
-                screenshot = self.client.get_source_screenshot(
-                    sourceName=source_name,
-                    imageFormat="png",
-                    imageWidth=640,
-                    imageHeight=480
-                )
-                
-                # Extraction d'image similaire à ci-dessus
-                if hasattr(screenshot, 'imageData'):
-                    img_data = screenshot.imageData
-                elif hasattr(screenshot, 'img_data'):
-                    img_data = screenshot.img_data
-                else:
-                    # Essayer d'accéder directement aux attributs du dictionnaire
-                    response_dict = screenshot.__dict__
-                    if 'imageData' in response_dict:
-                        img_data = response_dict['imageData']
-                    elif 'img_data' in response_dict:
-                        img_data = response_dict['img_data']
-                    elif 'image_data' in response_dict:
-                        img_data = response_dict['image_data']
-                    else:
-                        # Si aucun attribut n'est trouvé, passer au bloc catch
-                        raise ValueError("Attribut d'image introuvable dans la réponse")
-                
-                # Traitement de l'image
-                if img_data:
-                    # Supprimer le préfixe data:image/png;base64, si présent
-                    if isinstance(img_data, str) and ';base64,' in img_data:
-                        img_data = img_data.split(';base64,')[1]
-                    
-                    # Décoder l'image base64
-                    img_bytes = base64.b64decode(img_data)
-                    img = Image.open(io.BytesIO(img_bytes))
-                    
-                    # Mettre à jour l'image courante
-                    with self.frame_lock:
-                        self.current_frame = img
-                        self.frame_time = time.time()
-                    
-                    return img
-            except Exception as e:
-                logger.debug(f"Deuxième méthode échouée: {e}")
-                # Continuer vers d'autres méthodes alternatives ou générer une image test
+                    # Si aucun des attributs attendus n'est trouvé
+                    logger.debug(f"Structure de la réponse OBS 31.0+: {screenshot.__dict__}")
+                    raise ValueError("Structure de réponse inattendue pour OBS 31.0+")
             
-            # Si toutes les méthodes ont échoué, générer une image de test
-            logger.warning(f"Aucune méthode de capture n'a fonctionné pour {source_name}, génération d'image de test")
-            img = self._create_test_image(source_name, 640, 480)
-            
-            # Mettre à jour l'image courante
-            with self.frame_lock:
-                self.current_frame = img
-                self.frame_time = time.time()
-            
-            return img
+            if img_data:
+                # Traiter le préfixe data:image/png;base64, si présent
+                if isinstance(img_data, str) and ';base64,' in img_data:
+                    img_data = img_data.split(';base64,')[1]
                 
+                # Décoder l'image base64
+                img_bytes = base64.b64decode(img_data)
+                img = Image.open(io.BytesIO(img_bytes))
+                
+                # Mettre à jour l'image courante
+                with self.frame_lock:
+                    self.current_frame = img
+                    self.frame_time = time.time()
+                
+                return img
         except Exception as e:
-            logger.warning(f"Erreur lors de la capture d'écran: {str(e)}")
+            logger.debug(f"Méthode OBS 31.0+ échouée: {e}")
+        
+        # Tentative 2: Méthode alternative pour OBS 30.x
+        try:
+            screenshot = self.client.get_source_screenshot(
+                sourceName=source_name,
+                imageFormat="png",
+                imageWidth=640,
+                imageHeight=480
+            )
             
-            # Générer une image de test plutôt qu'une image noire
+            # Extraction similaire à celle de la tentative 1
+            img_data = None
+            for attr in ['imageData', 'img_data', 'image_data']:
+                if hasattr(screenshot, attr):
+                    img_data = getattr(screenshot, attr)
+                    break
+            
+            if not img_data and hasattr(screenshot, '__dict__'):
+                # Essayer d'accéder directement aux attributs du dictionnaire
+                for key in ['imageData', 'img_data', 'image_data', 'data']:
+                    if key in screenshot.__dict__:
+                        img_data = screenshot.__dict__[key]
+                        break
+            
+            if img_data:
+                # Traiter le préfixe data:image/png;base64, si présent
+                if isinstance(img_data, str) and ';base64,' in img_data:
+                    img_data = img_data.split(';base64,')[1]
+                
+                # Décoder l'image base64
+                img_bytes = base64.b64decode(img_data)
+                img = Image.open(io.BytesIO(img_bytes))
+                
+                # Mettre à jour l'image courante
+                with self.frame_lock:
+                    self.current_frame = img
+                    self.frame_time = time.time()
+                
+                return img
+        except Exception as e:
+            logger.debug(f"Méthode OBS 30.x échouée: {e}")
+        
+        # Tentative 3: Méthode pour OBS 28.x/29.x
+        try:
+            screenshot = self.client.get_source_screenshot(
+                source_name=source_name,
+                img_format="png",
+                width=640,
+                height=480
+            )
+            
+            # Extraire les données de l'image
+            img_data = None
+            if hasattr(screenshot, 'img_data'):
+                img_data = screenshot.img_data
+            elif hasattr(screenshot, '__dict__'):
+                # Essayer d'accéder directement aux attributs du dictionnaire
+                for key in ['img_data', 'imageData', 'image_data', 'data']:
+                    if key in screenshot.__dict__:
+                        img_data = screenshot.__dict__[key]
+                        break
+            
+            if img_data:
+                # Traiter le préfixe data:image/png;base64, si présent
+                if isinstance(img_data, str) and ';base64,' in img_data:
+                    img_data = img_data.split(';base64,')[1]
+                
+                # Décoder l'image base64
+                img_bytes = base64.b64decode(img_data)
+                img = Image.open(io.BytesIO(img_bytes))
+                
+                # Mettre à jour l'image courante
+                with self.frame_lock:
+                    self.current_frame = img
+                    self.frame_time = time.time()
+                
+                return img
+        except Exception as e:
+            logger.debug(f"Méthode OBS 28.x/29.x échouée: {e}")
+        
+        # Tentative 4: Approche minimale (dernière tentative)
+        try:
+            # Essai avec les options minimales
+            screenshot = None
+            try:
+                screenshot = self.client.get_source_screenshot(sourceName=source_name)
+            except Exception:
+                try:
+                    screenshot = self.client.get_source_screenshot(source_name=source_name)
+                except Exception:
+                    pass
+            
+            if screenshot:
+                # Tenter d'extraire les données d'image
+                img_data = None
+                
+                # Vérifier tous les attributs possibles
+                if hasattr(screenshot, '__dict__'):
+                    for key in ['imageData', 'img_data', 'image_data', 'data']:
+                        if key in screenshot.__dict__:
+                            img_data = screenshot.__dict__[key]
+                            break
+                
+                if img_data:
+                    # Traiter le préfixe data:image/png;base64, si présent
+                    if isinstance(img_data, str) and ';base64,' in img_data:
+                        img_data = img_data.split(';base64,')[1]
+                    
+                    # Décoder l'image base64
+                    img_bytes = base64.b64decode(img_data)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    
+                    # Mettre à jour l'image courante
+                    with self.frame_lock:
+                        self.current_frame = img
+                        self.frame_time = time.time()
+                    
+                    return img
+        except Exception as e:
+            logger.debug(f"Méthode minimale échouée: {e}")
+        
+        # Si aucune des méthodes n'a fonctionné
+        logger.error(f"Échec de toutes les méthodes de capture pour {source_name}")
+        
+        if self.use_test_images:
+            # Mode fallback activé, retourner une image de test
+            logger.info(f"Utilisation d'une image de test pour {source_name}")
             img = self._create_test_image(source_name, 640, 480)
             
             # Mettre à jour l'image courante
@@ -411,6 +475,9 @@ class OBSCapture:
                 self.frame_time = time.time()
             
             return img
+        else:
+            # En mode strict, retourner None pour indiquer un échec
+            return None
     
     def start_capture(self, source_name=None, interval=0.1):
         """Démarre la capture continue en arrière-plan
@@ -487,10 +554,13 @@ class OBSCapture:
         """
         with self.frame_lock:
             if self.current_frame is None:
-                # Créer une image de test si aucune image n'est disponible
-                frame = self._create_test_image("Current Frame", 640, 480)
-                timestamp = time.time()
-                return frame, timestamp
+                if self.use_test_images:
+                    # Créer une image de test si aucune image n'est disponible
+                    frame = self._create_test_image("Current Frame", 640, 480)
+                    timestamp = time.time()
+                    return frame, timestamp
+                else:
+                    return None, 0
             return self.current_frame, self.frame_time
     
     def get_frame_as_jpeg(self, quality=85):
@@ -506,8 +576,11 @@ class OBSCapture:
             frame, _ = self.get_current_frame()
             
             if frame is None:
-                # Si aucune image n'est disponible, créer une image de test
-                frame = self._create_test_image("JPEG Fallback", 640, 480)
+                if self.use_test_images:
+                    # Si aucune image n'est disponible, créer une image de test
+                    frame = self._create_test_image("JPEG Fallback", 640, 480)
+                else:
+                    return None
             
             # Convertir en JPEG
             img_buffer = io.BytesIO()
@@ -515,11 +588,15 @@ class OBSCapture:
             return img_buffer.getvalue()
         except Exception as e:
             logger.error(f"Erreur lors de la conversion en JPEG: {e}")
-            # Créer une image très simple en cas d'erreur
-            simple_img = Image.new('RGB', (640, 480), color=(0, 0, 128))
-            img_buffer = io.BytesIO()
-            simple_img.save(img_buffer, format='JPEG', quality=quality)
-            return img_buffer.getvalue()
+            
+            if self.use_test_images:
+                # Créer une image très simple en cas d'erreur
+                simple_img = Image.new('RGB', (640, 480), color=(0, 0, 128))
+                img_buffer = io.BytesIO()
+                simple_img.save(img_buffer, format='JPEG', quality=quality)
+                return img_buffer.getvalue()
+            else:
+                return None
     
     def disconnect(self):
         """Déconnecte du serveur OBS WebSocket"""
@@ -527,3 +604,12 @@ class OBSCapture:
         self.connected = False
         self.client = None
         logger.info("Déconnecté d'OBS WebSocket")
+    
+    def enable_test_images(self, enable=True):
+        """Active ou désactive l'utilisation d'images de test en cas d'échec
+        
+        Args:
+            enable (bool): True pour activer, False pour désactiver
+        """
+        self.use_test_images = enable
+        logger.info(f"Mode d'images de test {'activé' if enable else 'désactivé'}")
