@@ -290,102 +290,117 @@ class OBSCapture:
                 logger.error("Aucune source vidéo disponible")
                 return self._create_test_image("Aucune source", 640, 480)
         
+        # Capture d'écran de la source - Méthode directe pour OBS 30+
         try:
-            # Capture d'écran de la source - Adapter selon API
             logger.debug(f"Tentative de capture pour: {source_name}")
             
-            # La syntaxe varie selon la version d'OBS WebSocket
+            # Méthode pour OBS 30+
             try:
-                # OBS 30+ semble utiliser un format de méthode différent, essayons d'abord ça
-                try:
-                    # Essayer l'approche de capture directe spécifique à OBS 28+
-                    from obsws_python import requests as obsreq
-                    screenshot_request = obsreq.GetSourceScreenshot(
-                        sourceName=source_name,
-                        imageFormat="png",
-                        imageWidth=640,
-                        imageHeight=480
-                    )
-                    screenshot = self.client.call(screenshot_request)
-                except (ImportError, AttributeError) as e:
-                    logger.debug(f"Méthode obsreq non disponible: {e}")
-                    raise Exception("Méthode de requête directe non disponible")
-            except Exception as e0:
-                logger.debug(f"Première méthode échouée: {e0}")
+                screenshot = self.client.get_source_screenshot(
+                    source_name=source_name,
+                    image_format="png",
+                    image_width=640,
+                    image_height=480
+                )
                 
-                try:
-                    # Essai avec sourceName (OBS 29+/27+)
-                    screenshot = self.client.get_source_screenshot(
-                        sourceName=source_name,
-                        imageFormat="png",
-                        imageWidth=640,
-                        imageHeight=480
-                    )
-                except Exception as e1:
-                    logger.debug(f"Deuxième tentative échouée: {e1}")
+                # Extrait l'image des données
+                if hasattr(screenshot, 'image_data'):
+                    img_data = screenshot.image_data
+                elif hasattr(screenshot, 'img_data'):
+                    img_data = screenshot.img_data
+                else:
+                    # Essayer d'accéder directement aux attributs du dictionnaire
+                    response_dict = screenshot.__dict__
+                    if 'image_data' in response_dict:
+                        img_data = response_dict['image_data']
+                    elif 'img_data' in response_dict:
+                        img_data = response_dict['img_data']
+                    elif 'imageData' in response_dict:
+                        img_data = response_dict['imageData']
+                    else:
+                        # Si aucun attribut n'est trouvé, passer au bloc catch
+                        raise ValueError("Attribut d'image introuvable dans la réponse")
+                
+                # Traitement de l'image
+                if img_data:
+                    # Supprimer le préfixe data:image/png;base64, si présent
+                    if isinstance(img_data, str) and ';base64,' in img_data:
+                        img_data = img_data.split(';base64,')[1]
                     
-                    try:
-                        # Essai avec source_name (autres versions)
-                        screenshot = self.client.get_source_screenshot(
-                            source_name=source_name,
-                            img_format="png",
-                            width=640,
-                            height=480
-                        )
-                    except Exception as e2:
-                        logger.debug(f"Troisième tentative échouée: {e2}")
-                        
-                        try:
-                            # Essai minimaliste
-                            screenshot = self.client.get_source_screenshot(
-                                sourceName=source_name
-                            )
-                        except Exception as e3:
-                            logger.debug(f"Quatrième tentative échouée: {e3}")
-                            raise Exception("Aucune méthode de capture ne fonctionne")
+                    # Décoder l'image base64
+                    img_bytes = base64.b64decode(img_data)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    
+                    # Mettre à jour l'image courante
+                    with self.frame_lock:
+                        self.current_frame = img
+                        self.frame_time = time.time()
+                    
+                    return img
+            except Exception as e:
+                logger.debug(f"Première méthode échouée: {e}")
+                # Continuer vers la méthode alternativeù
+                
+            # Méthode alternative pour les versions précédentes d'OBS
+            try:
+                screenshot = self.client.get_source_screenshot(
+                    sourceName=source_name,
+                    imageFormat="png",
+                    imageWidth=640,
+                    imageHeight=480
+                )
+                
+                # Extraction d'image similaire à ci-dessus
+                if hasattr(screenshot, 'imageData'):
+                    img_data = screenshot.imageData
+                elif hasattr(screenshot, 'img_data'):
+                    img_data = screenshot.img_data
+                else:
+                    # Essayer d'accéder directement aux attributs du dictionnaire
+                    response_dict = screenshot.__dict__
+                    if 'imageData' in response_dict:
+                        img_data = response_dict['imageData']
+                    elif 'img_data' in response_dict:
+                        img_data = response_dict['img_data']
+                    elif 'image_data' in response_dict:
+                        img_data = response_dict['image_data']
+                    else:
+                        # Si aucun attribut n'est trouvé, passer au bloc catch
+                        raise ValueError("Attribut d'image introuvable dans la réponse")
+                
+                # Traitement de l'image
+                if img_data:
+                    # Supprimer le préfixe data:image/png;base64, si présent
+                    if isinstance(img_data, str) and ';base64,' in img_data:
+                        img_data = img_data.split(';base64,')[1]
+                    
+                    # Décoder l'image base64
+                    img_bytes = base64.b64decode(img_data)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    
+                    # Mettre à jour l'image courante
+                    with self.frame_lock:
+                        self.current_frame = img
+                        self.frame_time = time.time()
+                    
+                    return img
+            except Exception as e:
+                logger.debug(f"Deuxième méthode échouée: {e}")
+                # Continuer vers d'autres méthodes alternatives ou générer une image test
             
-            # Traitement de la réponse - vérifier divers types de réponses possibles
-            img_data = None
+            # Si toutes les méthodes ont échoué, générer une image de test
+            logger.warning(f"Aucune méthode de capture n'a fonctionné pour {source_name}, génération d'image de test")
+            img = self._create_test_image(source_name, 640, 480)
             
-            # Vérifier les attributs possibles où les données d'image pourraient se trouver
-            if hasattr(screenshot, 'img_data'):
-                img_data = screenshot.img_data
-            elif hasattr(screenshot, 'imageData'):
-                img_data = screenshot.imageData
-            elif hasattr(screenshot, 'image_data'):
-                img_data = screenshot.image_data
-            else:
-                # Essayer d'accéder directement aux attributs du dictionnaire
-                response_dict = screenshot.__dict__
-                logger.debug(f"Structure de la réponse: {response_dict}")
-                
-                for key in ['img_data', 'imageData', 'image_data', 'data']:
-                    if key in response_dict:
-                        img_data = response_dict[key]
-                        break
+            # Mettre à jour l'image courante
+            with self.frame_lock:
+                self.current_frame = img
+                self.frame_time = time.time()
             
-            # Si on a trouvé des données d'image
-            if img_data:
-                # Supprimer le préfixe data:image/jpg;base64, si présent
-                if isinstance(img_data, str) and ';base64,' in img_data:
-                    img_data = img_data.split(';base64,')[1]
-                
-                # Décoder l'image base64
-                img_bytes = base64.b64decode(img_data)
-                img = Image.open(io.BytesIO(img_bytes))
-                
-                # Mettre à jour l'image courante
-                with self.frame_lock:
-                    self.current_frame = img
-                    self.frame_time = time.time()
-                
-                return img
-            else:
-                logger.warning(f"Capture d'écran réussie mais pas de données d'image pour {source_name}")
-                return self._create_test_image(source_name, 640, 480)
+            return img
                 
         except Exception as e:
-            logger.error(f"Erreur lors de la capture d'écran: {str(e)}")
+            logger.warning(f"Erreur lors de la capture d'écran: {str(e)}")
             
             # Générer une image de test plutôt qu'une image noire
             img = self._create_test_image(source_name, 640, 480)
