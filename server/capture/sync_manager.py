@@ -21,7 +21,7 @@ class SyncManager:
         """Initialise le gestionnaire de synchronisation
         
         Args:
-            obs_capture (OBSCapture): Instance de capture OBS
+            obs_capture (OBS31Capture): Instance de capture OBS
             pyaudio_capture (PyAudioCapture): Instance de capture PyAudio
             stream_processor (StreamProcessor): Instance du processeur de flux
             buffer_size (int, optional): Taille du buffer de synchronisation. Par défaut 10.
