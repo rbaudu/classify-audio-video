@@ -9,9 +9,11 @@ Classify Audio Video est une application qui capture et analyse les flux audio e
 La dernière mise à jour ajoute la compatibilité avec OBS 31.0.2 et son API WebSocket intégrée :
 
 - **Classe OBS31Capture** : Nouvelle classe optimisée pour capturer des images depuis OBS 31.0.2+ via WebSocket
+- **Adaptateur OBS31Adapter** : Classe unifiant les fonctionnalités de capture, événements et média pour OBS 31.0.2+
 - **Compatibilité OBS native** : Plus besoin d'installer le plugin WebSocket externe pour OBS 31.0.2+
 - **Mécanisme de fallback** : Option pour utiliser des images de test si la capture échoue, garantissant la continuité de l'application
 - **Scripts de diagnostic** : Outils pour explorer l'API WebSocket et tester la capture
+- **Utilisé par défaut** : L'application utilise désormais OBS31Capture par défaut mais reste compatible avec les anciennes versions
 
 Voir la [Documentation spécifique pour OBS 31.0.2](README_OBS31.md) pour plus de détails sur cette fonctionnalité.
 
@@ -137,8 +139,55 @@ python install_requirements.py
 python tests/test_obs_31_api.py
 python tests/test_obs_31_capture.py
 
-# Démarrer l'application
-python server.py
+# Démarrer l'application (utilise OBS31Capture par défaut)
+python run.py
+```
+
+## Options de démarrage
+
+L'application propose plusieurs options pour contrôler la version d'OBS à utiliser :
+
+```bash
+# Utiliser OBS31Capture (par défaut)
+python run.py
+
+# Utiliser explicitement OBS31Capture avec l'adaptateur
+python run.py --obs-version 31 --use-adapter true
+
+# Utiliser OBS31Capture directement (sans adaptateur)
+python run.py --obs-version 31 --use-adapter false
+
+# Utiliser l'ancienne implémentation pour OBS 30 et versions antérieures
+python run.py --obs-version legacy
+
+# Spécifier l'hôte et le port OBS
+python run.py --obs-host 192.168.1.10 --obs-port 4455
+
+# Obtenir la liste complète des options
+python run.py --help
+```
+
+## Configuration de l'environnement
+
+Vous pouvez également configurer l'application via des variables d'environnement :
+
+```bash
+# Configuration OBS
+export OBS_HOST=localhost
+export OBS_PORT=4455
+export OBS_PASSWORD=votre_mot_de_passe
+
+# Configuration OBS31
+export USE_OBS_31=true      # true pour OBS 31.0.2+, false pour versions antérieures
+export USE_OBS_ADAPTER=true # true pour utiliser l'adaptateur, false pour utiliser directement OBS31Capture
+
+# Configuration Flask
+export FLASK_HOST=0.0.0.0
+export FLASK_PORT=5000
+export FLASK_DEBUG=false
+
+# Démarrer l'application avec ces paramètres
+python run.py
 ```
 
 ## Contribution
@@ -153,8 +202,11 @@ Ce projet est distribué sous licence MIT. Voir le fichier `LICENSE` pour plus d
 
 - [OBS Studio](https://obsproject.com/)
 - [obs-websocket](https://github.com/obsproject/obs-websocket)
+- [obsws-python](https://github.com/aatikturk/obsws-python)
 - [PyAudio](https://people.csail.mit.edu/hubert/pyaudio/)
 - [Flask](https://flask.palletsprojects.com/)
 - [TensorFlow](https://www.tensorflow.org/)
 - [OpenCV](https://opencv.org/)
 - [Chart.js](https://www.chartjs.org/)
+- [Pillow](https://python-pillow.org/)
+- [NumPy](https://numpy.org/)
