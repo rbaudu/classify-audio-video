@@ -239,36 +239,51 @@ class OBS31Capture:
         
         # Méthode de capture OBS 31.0.x
         try:
-            # Utiliser directement la classe de requête pour OBS 31.0+
-            from obsws_python.requests import GetSourceScreenshot
+            # Utiliser la méthode get_source_screenshot avec tous les paramètres requis
+            # D'après la documentation, la signature est:
+            # get_source_screenshot(name, img_format, width, height, quality)
+            logger.info(f"Tentative de capture pour {source_name} avec tous les paramètres")
             
-            # Création de la requête
-            screenshot_request = GetSourceScreenshot(
-                sourceName=source_name,
-                imageFormat="png",
-                imageWidth=640,
-                imageHeight=480
+            # Préparation des paramètres selon la signature
+            name = source_name
+            img_format = "png"  # Format d'image
+            width = 640        # Largeur
+            height = 480       # Hauteur
+            quality = 75       # Qualité (0-100)
+            
+            # Appel de la méthode avec les arguments corrects
+            screenshot = self.client.get_source_screenshot(
+                name,         # Position 1: name
+                img_format,   # Position 2: img_format
+                width,        # Position 3: width
+                height,       # Position 4: height
+                quality       # Position 5: quality
             )
             
-            # Appel de la requête
-            screenshot = self.client.call(screenshot_request)
+            logger.info(f"Réponse de type: {type(screenshot)}")
             
             # Extraction des données d'image
             img_data = None
             if hasattr(screenshot, 'imageData'):
                 img_data = screenshot.imageData
+                logger.info("Attribut 'imageData' trouvé")
             elif hasattr(screenshot, 'img_data'):
                 img_data = screenshot.img_data
+                logger.info("Attribut 'img_data' trouvé")
             elif hasattr(screenshot, 'data'):
                 img_data = screenshot.data
-            
-            # Si aucun attribut standard n'est trouvé, parcourir tous les attributs
-            if img_data is None and hasattr(screenshot, '__dict__'):
-                for key, value in screenshot.__dict__.items():
-                    if isinstance(value, str) and (';base64,' in value or len(value) > 100):
-                        img_data = value
-                        logger.debug(f"Données d'image trouvées dans l'attribut '{key}'")
-                        break
+                logger.info("Attribut 'data' trouvé")
+            else:
+                # Vérifier directement les attributs disponibles
+                if hasattr(screenshot, '__dict__'):
+                    logger.info(f"Attributs disponibles dans la réponse: {list(screenshot.__dict__.keys())}")
+                    
+                    # Parcourir tous les attributs pour trouver des données potentielles d'image
+                    for key, value in screenshot.__dict__.items():
+                        if isinstance(value, str) and (';base64,' in value or len(value) > 100):
+                            logger.info(f"Données potentielles d'image trouvées dans l'attribut '{key}'")
+                            img_data = value
+                            break
             
             if img_data:
                 # Traiter le préfixe data:image/png;base64, si présent
@@ -276,38 +291,21 @@ class OBS31Capture:
                     img_data = img_data.split(';base64,')[1]
                 
                 # Décoder l'image base64
-                img_bytes = base64.b64decode(img_data)
-                img = Image.open(io.BytesIO(img_bytes))
-                
-                # Mettre à jour l'image courante
-                with self.frame_lock:
-                    self.current_frame = img
-                    self.frame_time = time.time()
-                
-                return img
+                try:
+                    img_bytes = base64.b64decode(img_data)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    
+                    # Mettre à jour l'image courante
+                    with self.frame_lock:
+                        self.current_frame = img
+                        self.frame_time = time.time()
+                    
+                    logger.info(f"Capture d'image réussie: {img.size}")
+                    return img
+                except Exception as decode_err:
+                    logger.error(f"Erreur de décodage de l'image: {decode_err}")
             else:
                 logger.error("Aucune donnée d'image trouvée dans la réponse OBS")
-        
-        except ImportError:
-            logger.error("Impossible d'importer GetSourceScreenshot depuis obsws_python.requests")
-            # Tenter une approche alternative
-            try:
-                # Appeler directement avec une requête générique
-                request = {
-                    "requestType": "GetSourceScreenshot",
-                    "requestData": {
-                        "sourceName": source_name,
-                        "imageFormat": "png",
-                        "imageWidth": 640,
-                        "imageHeight": 480
-                    }
-                }
-                screenshot = self.client.call(request)
-                
-                # Traitement similaire à ci-dessus
-                # ...
-            except Exception as alt_e:
-                logger.error(f"Alternative échouée: {alt_e}")
         
         except Exception as e:
             logger.error(f"Erreur lors de la capture d'écran: {e}")
