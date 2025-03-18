@@ -16,6 +16,12 @@ class Config:
     OBS_PORT = int(os.environ.get('OBS_PORT') or 4455)
     OBS_PASSWORD = os.environ.get('OBS_PASSWORD') or ''  # empty if no authentication 
     
+    # Configuration OBS version (31 pour OBS 31.0.2+, autre valeur pour les versions antérieures)
+    USE_OBS_31 = os.environ.get('USE_OBS_31') != 'false'  # Par défaut TRUE, utiliser OBS31Capture
+    
+    # Configuration adaptateur (true pour utiliser OBS31Adapter, false pour utiliser directement OBS31Capture)
+    USE_OBS_ADAPTER = os.environ.get('USE_OBS_ADAPTER') != 'false'  # Par défaut TRUE
+    
     # Configuration des sources OBS
     VIDEO_SOURCE_NAME = os.environ.get('VIDEO_SOURCE_NAME') or 'camera'  # Modifié pour correspondre à votre source caméra
     AUDIO_SOURCE_NAME = os.environ.get('AUDIO_SOURCE_NAME') or 'Default Audio Source'
