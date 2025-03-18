@@ -218,12 +218,37 @@ class OBSCapture:
         for i in range(0, height, 40):
             draw.line([(0, i), (width, i)], fill=(255, 255, 255), width=1)
         
-        # Dessiner des formes géométriques aléatoires
+        # Dessiner des rectangles ou cercles
+        margin = 20  # Marge pour éviter les problèmes aux bords
         for _ in range(5):
-            x1 = random.randint(0, width)
-            y1 = random.randint(0, height)
-            x2 = random.randint(0, width)
-            y2 = random.randint(0, height)
+            # Générer des coordonnées valides pour un rectangle
+            x1 = random.randint(margin, width - margin)
+            y1 = random.randint(margin, height - margin)
+            x2 = random.randint(margin, width - margin)
+            y2 = random.randint(margin, height - margin)
+            
+            # Assurer que x1 < x2 et y1 < y2
+            if x1 > x2:
+                x1, x2 = x2, x1
+            if y1 > y2:
+                y1, y2 = y2, y1
+                
+            # Assurer que le rectangle a une taille minimale
+            if x2 - x1 < 10:
+                x2 = x1 + 10
+            if y2 - y1 < 10:
+                y2 = y1 + 10
+            
+            # Vérifier que les coordonnées sont dans les limites
+            x1 = max(0, min(x1, width-1))
+            y1 = max(0, min(y1, height-1))
+            x2 = max(0, min(x2, width-1))
+            y2 = max(0, min(y2, height-1))
+            
+            # Vérification finale
+            if x1 >= x2 or y1 >= y2:
+                logger.warning(f"Coordonnées invalides: [{x1},{y1},{x2},{y2}], utilisation de valeurs par défaut")
+                x1, y1, x2, y2 = margin, margin, width-margin, height-margin
             
             shape_color = colors[random.randint(0, len(colors)-1)]
             
@@ -271,36 +296,53 @@ class OBSCapture:
             
             # La syntaxe varie selon la version d'OBS WebSocket
             try:
-                # Essai avec sourceName (OBS 29+/27+)
-                screenshot = self.client.get_source_screenshot(
-                    sourceName=source_name,
-                    imageFormat="jpg",
-                    imageWidth=640,
-                    imageHeight=480
-                )
-            except Exception as e1:
-                logger.debug(f"Première tentative échouée: {e1}")
+                # OBS 30+ semble utiliser un format de méthode différent, essayons d'abord ça
+                try:
+                    # Essayer l'approche de capture directe spécifique à OBS 28+
+                    from obsws_python import requests as obsreq
+                    screenshot_request = obsreq.GetSourceScreenshot(
+                        sourceName=source_name,
+                        imageFormat="png",
+                        imageWidth=640,
+                        imageHeight=480
+                    )
+                    screenshot = self.client.call(screenshot_request)
+                except (ImportError, AttributeError) as e:
+                    logger.debug(f"Méthode obsreq non disponible: {e}")
+                    raise Exception("Méthode de requête directe non disponible")
+            except Exception as e0:
+                logger.debug(f"Première méthode échouée: {e0}")
                 
                 try:
-                    # Essai avec source_name (autres versions)
+                    # Essai avec sourceName (OBS 29+/27+)
                     screenshot = self.client.get_source_screenshot(
                         sourceName=source_name,
-                        imageFormat="jpg",
-                        width=640,
-                        height=480
+                        imageFormat="png",
+                        imageWidth=640,
+                        imageHeight=480
                     )
-                except Exception as e2:
-                    logger.debug(f"Deuxième tentative échouée: {e2}")
+                except Exception as e1:
+                    logger.debug(f"Deuxième tentative échouée: {e1}")
                     
                     try:
-                        # Essai avec méthode alternative
+                        # Essai avec source_name (autres versions)
                         screenshot = self.client.get_source_screenshot(
-                            sourceName=source_name,
-                            imageFormat="jpg"
+                            source_name=source_name,
+                            img_format="png",
+                            width=640,
+                            height=480
                         )
-                    except Exception as e3:
-                        logger.debug(f"Troisième tentative échouée: {e3}")
-                        raise Exception("Aucune méthode de capture ne fonctionne")
+                    except Exception as e2:
+                        logger.debug(f"Troisième tentative échouée: {e2}")
+                        
+                        try:
+                            # Essai minimaliste
+                            screenshot = self.client.get_source_screenshot(
+                                sourceName=source_name
+                            )
+                        except Exception as e3:
+                            logger.debug(f"Quatrième tentative échouée: {e3}")
+                            raise Exception("Aucune méthode de capture ne fonctionne")
             
             # Traitement de la réponse - vérifier divers types de réponses possibles
             img_data = None
@@ -445,16 +487,24 @@ class OBSCapture:
         Returns:
             bytes: Données JPEG ou None si pas d'image
         """
-        frame, _ = self.get_current_frame()
-        
-        if frame is None:
-            # Si aucune image n'est disponible, créer une image de test
-            frame = self._create_test_image("JPEG Fallback", 640, 480)
-        
-        # Convertir en JPEG
-        img_buffer = io.BytesIO()
-        frame.save(img_buffer, format='JPEG', quality=quality)
-        return img_buffer.getvalue()
+        try:
+            frame, _ = self.get_current_frame()
+            
+            if frame is None:
+                # Si aucune image n'est disponible, créer une image de test
+                frame = self._create_test_image("JPEG Fallback", 640, 480)
+            
+            # Convertir en JPEG
+            img_buffer = io.BytesIO()
+            frame.save(img_buffer, format='JPEG', quality=quality)
+            return img_buffer.getvalue()
+        except Exception as e:
+            logger.error(f"Erreur lors de la conversion en JPEG: {e}")
+            # Créer une image très simple en cas d'erreur
+            simple_img = Image.new('RGB', (640, 480), color=(0, 0, 128))
+            img_buffer = io.BytesIO()
+            simple_img.save(img_buffer, format='JPEG', quality=quality)
+            return img_buffer.getvalue()
     
     def disconnect(self):
         """Déconnecte du serveur OBS WebSocket"""
